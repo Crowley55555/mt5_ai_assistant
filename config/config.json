@@ -1,0 +1,10 @@
+{
+    "database": {
+        "type": "sqlite",
+        "connection_string": "sqlite:///data/trading.db"
+    },
+    "accounts": [],
+    "telegram": {},
+    "ollama": {},
+    "risk_management": {}
+}
