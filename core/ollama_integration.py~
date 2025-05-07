@@ -254,7 +254,7 @@ class OllamaIntegration:
                     elif isinstance(value, (list, tuple)) and len(value) > 0 and isinstance(value[0], (int, float)):
                         # Для списков/кортежей из чисел выводим последние 5 значений
                         lines.append(f"{' ' * indent}{key}: {', '.join(map(str, value[-5:]))}")
-                    else:
+                        else:
                         # Простые значения
                         lines.append(f"{' ' * indent}{key}: {value}")
                 return lines

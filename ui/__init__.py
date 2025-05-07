@@ -14,7 +14,7 @@ from .components import (
     RiskManagementPanel,
     LogViewer
 )
-from .styles import apply_theme
+from .styles import ThemeManager
 
 __all__ = [
     'TradingAssistantApp',
@@ -22,7 +22,7 @@ __all__ = [
     'StrategyControlPanel',
     'RiskManagementPanel',
     'LogViewer',
-    'apply_theme'
+    'ThemeManager'
 ]
 
 # Версия модуля UI
@@ -32,7 +32,7 @@ __version__ = '1.0.0'
 def init_ui():
     """Инициализация стилей и тем интерфейса"""
     try:
-        apply_theme('light')
+        ThemeManager('light')
         return True
     except Exception as e:
         import logging

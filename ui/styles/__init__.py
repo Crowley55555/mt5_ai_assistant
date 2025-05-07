@@ -1,12 +1,17 @@
 """
-Стили и темы оформления
+Модуль стилей и тем оформления
 
 Содержит:
 - apply_theme() - применение выбранной темы
-- стили для конкретных виджетов
+- configure_styles() - настройка конкретных стилей виджетов
 """
 
-from .themes import apply_theme
-from .widget_styles import configure_styles
+# Импортируем функции из themes.py и widget_styles.py
+from .themes import ThemeManager
+from .widget_styles import StyleManager
 
-__all__ = ['apply_theme', 'configure_styles']
+# Экспортируем только эти функции по умолчанию
+__all__ = [
+    'ThemeManager',
+    'StyleManager'
+]

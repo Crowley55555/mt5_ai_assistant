@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from typing import Optional, Dict
+from typing import Dict, List, Optional
 from config.settings import Settings
 from utils.logger import TradingLogger
 from core.mt5_client import MT5Client
@@ -10,8 +10,7 @@ from core.ollama_integration import OllamaIntegration
 from core.strategies import SniperStrategy, SmartSniperStrategy, SmartMoneyStrategy
 from config.constants import Timeframes
 import logging
-from pathlib import Path
-import shutil
+
 
 class TradingAssistantApp:
     def __init__(self, root: tk.Tk):
@@ -21,303 +20,118 @@ class TradingAssistantApp:
 
         # Инициализация компонентов
         self.settings = Settings()
-        self.logger = TradingLogger(log_file="logs/trading_assistant.log")
-        self.settings.set_logger(self.logger)
-        self.mt5_client = MT5Client(self.logger)
-        self.risk_manager = RiskManager(self.mt5_client, self.logger)
+        self._app_logger = TradingLogger(log_file="logs/trading_assistant.log")
+        self.logger = self._app_logger.logger  # Получаем корневой логгер
+        self.mt5_client = MT5Client(self._app_logger)
+        self.risk_manager = RiskManager(self.mt5_client, self._app_logger)
         self.telegram_bot = None
         self.ollama = None
 
-        # Инициализация стратегий
+        # Стратегии
         self.strategies = {
-            "Снайпер": SniperStrategy(self.mt5_client, self.logger),
-            "Смарт Снайпер": SmartSniperStrategy(self.mt5_client, self.logger),
-            "Смарт Мани": SmartMoneyStrategy(self.mt5_client, self.logger)
+            "Снайпер": SniperStrategy("Снайпер", self.mt5_client, self._app_logger),
+            "Смарт Снайпер": SmartSniperStrategy("Смарт Снайпер", self.mt5_client, self._app_logger),
+            "Смарт Мани": SmartMoneyStrategy("Смарт Мани", self.mt5_client, self._app_logger)
         }
 
-        def _setup_account_ui(self, parent_frame):
-            """Настройка UI компонентов для управления аккаунтами"""
-            self.account_frame = ttk.LabelFrame(parent_frame, text="Управление аккаунтами MT5", padding="10")
-            self.account_frame.pack(fill=tk.X, pady=5)
-
-            # Combobox для выбора аккаунта
-            ttk.Label(self.account_frame, text="Аккаунт:").grid(row=0, column=0, sticky=tk.W)
-            self.account_combobox = ttk.Combobox(self.account_frame, state="readonly")
-            self.account_combobox.grid(row=0, column=1, sticky=tk.EW, padx=5)
-            self.account_combobox.bind("<<ComboboxSelected>>", self._on_account_select)
-
-            # Поля ввода
-            fields = [
-                ("Логин:", "login_entry", ""),
-                ("Пароль:", "password_entry", "*"),
-                ("Сервер:", "server_entry", ""),
-                ("Путь к MT5:", "path_entry", "")
-            ]
-
-            for i, (label, attr_name, show) in enumerate(fields, start=1):
-                ttk.Label(self.account_frame, text=label).grid(row=i, column=0, sticky=tk.W)
-                entry = ttk.Entry(self.account_frame, show=show)
-                entry.grid(row=i, column=1, sticky=tk.EW, padx=5)
-                setattr(self, attr_name, entry)
-                if label == "Путь к MT5:":
-                    ttk.Button(self.account_frame, text="Обзор", command=self._browse_mt5_path).grid(row=i, column=2,
-                                                                                                     padx=5)
-
-            # Кнопки управления
-            btn_frame = ttk.Frame(self.account_frame)
-            btn_frame.grid(row=len(fields) + 1, column=0, columnspan=3, pady=(5, 0))
-
-            buttons = [
-                ("Добавить аккаунт", self._add_account),
-                ("Удалить аккаунт", self._remove_account),
-                ("Подключиться", self._connect_mt5)
-            ]
-
-            for text, command in buttons:
-                ttk.Button(btn_frame, text=text, command=command).pack(
-                    side=tk.LEFT if text != "Подключиться" else tk.RIGHT, padx=2)
-
-        def _show_trade_statistics(self):
-            """Показывает статистику сделок"""
-            if not hasattr(self, 'core') or not self.core.database:
-                messagebox.showerror("Ошибка", "База данных не подключена")
-                return
-
-            stats = self.core.risk_manager.get_trade_statistics()
-            messagebox.showinfo(
-                "Статистика",
-                f"Всего сделок: {stats['total_trades']}\n"
-                f"Процент прибыльных: {stats['win_rate']:.1%}\n"
-                f"Средняя прибыль: {stats['avg_profit']:.2f}"
-            )
-
-        def _on_account_select(self, event=None):
-            """Обработчик выбора аккаунта"""
-            try:
-                idx = self.account_combobox.current()
-                if idx >= 0:
-                    account = self.settings.accounts[idx]
-                    self.login_entry.delete(0, tk.END)
-                    self.login_entry.insert(0, account.get("login", ""))
-                    self.password_entry.delete(0, tk.END)
-                    self.password_entry.insert(0, account.get("password", ""))
-                    self.server_entry.delete(0, tk.END)
-                    self.server_entry.insert(0, account.get("server", ""))
-                    self.path_entry.delete(0, tk.END)
-                    self.path_entry.insert(0, account.get("path", ""))
-                    self.settings.set_current_account(idx)
-                    self.logger.info(f"Выбран аккаунт {account['login']}")
-            except Exception as e:
-                self.logger.error(f"Ошибка выбора аккаунта: {str(e)}")
-
-        def _add_account(self):
-            """Добавление нового аккаунта"""
-            try:
-                account_data = {
-                    "login": self.login_entry.get(),
-                    "password": self.password_entry.get(),
-                    "server": self.server_entry.get(),
-                    "path": self.path_entry.get()
-                }
-
-                if not all(account_data.values()):
-                    self.logger.warning("Не все поля аккаунта заполнены")
-                    messagebox.showerror("Ошибка", "Заполните все поля")
-                    return
-
-                self.settings.add_account(**account_data)
-                self._update_accounts_dropdown()
-                messagebox.showinfo("Успех", "Аккаунт сохранен")
-                self.logger.info(f"Добавлен новый аккаунт: {account_data['login']}")
-            except Exception as e:
-                self.logger.error(f"Ошибка добавления аккаунта: {str(e)}")
-                messagebox.showerror("Ошибка", f"Не удалось добавить аккаунт: {str(e)}")
-
-        def _update_accounts_dropdown(self):
-            """Обновление списка аккаунтов в Combobox"""
-            try:
-                accounts = self.settings.accounts
-                self.account_combobox["values"] = [f"{acc['login']}@{acc['server']}" for acc in accounts]
-                if accounts:
-                    self.account_combobox.current(self.settings.current_account_index)
-                    self.logger.debug("Обновлен список аккаунтов в интерфейсе")
-            except Exception as e:
-                self.logger.error(f"Ошибка обновления списка аккаунтов: {str(e)}")
-
-        def _show_trade_statistics(self):
-            """Новый метод для отображения статистики"""
-            if not hasattr(self, 'core') or not self.core.database:
-                return
-
-            stats = self.core.risk_manager.get_trade_statistics()
-            text = (
-                f"Статистика сделок:\n"
-                f"Всего сделок: {stats['total_trades']}\n"
-                f"Процент прибыльных: {stats['win_rate']:.1%}\n"
-                f"Средняя прибыль: {stats['avg_profit']:.2f}"
-            )
-            messagebox.showinfo("Статистика", text)
-
+        # Атрибуты для виджетов
+        self.is_running = False
+        self.update_interval = 5000  # Интервал обновления в миллисекундах
+        self.account_combobox = None
+        self.login_entry = None
+        self.password_entry = None
+        self.server_entry = None
+        self.path_entry = None
+        self.telegram_token_entry = None
+        self.chat_id_entry = None
+        self.ollama_url_entry = None
+        self.ollama_model_entry = None
+        self.risk_per_trade_spin = None
+        self.risk_all_trades_spin = None
+        self.daily_risk_spin = None
+        self.strategy_vars = {}
 
         # Создание интерфейса
         self._create_widgets()
         self._load_settings()
 
-        # Переменные состояния
-        self.is_running = False
-        self.update_interval = 5000  # 5 секунд
-
     def _create_widgets(self):
         """Создание всех элементов интерфейса"""
-        # Основные фреймы
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Левая панель - настройки
         left_panel = ttk.Frame(main_frame, width=300, padding="10")
         left_panel.pack(side=tk.LEFT, fill=tk.Y)
 
-        # Правая панель - лог и графики
         right_panel = ttk.Frame(main_frame, padding="10")
         right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # Настройки подключения
-        import json
-        from typing import Dict, List
+        # Управление аккаунтами
+        self._setup_account_ui(left_panel)
 
-        class Settings:
-            def __init__(self, config_path: str = "config/config.json"):
-                self.config_path = Path(config_path)
-                self._settings = self._load_settings()
+        # Telegram уведомления
+        self._setup_telegram_ui(left_panel)
 
-            def _load_settings(self):
-                def _load_settings(self):
-                    """Полностью прописанная функция загрузки настроек в интерфейс"""
-                    # Загрузка аккаунта MT5
-                    current_account = self.settings.current_account
-                    self.account_manager.login_entry.delete(0, tk.END)
-                    self.account_manager.login_entry.insert(0, current_account.get('login', ''))
-                    self.account_manager.password_entry.delete(0, tk.END)
-                    self.account_manager.password_entry.insert(0, current_account.get('password', ''))
-                    self.account_manager.server_entry.delete(0, tk.END)
-                    self.account_manager.server_entry.insert(0, current_account.get('server', ''))
-                    self.account_manager.path_entry.delete(0, tk.END)
-                    self.account_manager.path_entry.insert(0, current_account.get('path', ''))
+        # Интеграция с Ollama
+        self._setup_ollama_ui(left_panel)
 
-                    # Загрузка Telegram настроек
-                    self.account_manager.telegram_token_entry.delete(0, tk.END)
-                    self.account_manager.telegram_token_entry.insert(0, self.settings.telegram.get('token', ''))
-                    self.account_manager.chat_id_entry.delete(0, tk.END)
-                    self.account_manager.chat_id_entry.insert(0, self.settings.telegram.get('chat_id', ''))
+        # Риск-менеджмент
+        self._setup_risk_management_ui(left_panel)
 
-                    # Загрузка Ollama настроек
-                    self.ollama_url_entry.delete(0, tk.END)
-                    self.ollama_url_entry.insert(0, self.settings.ollama.get('base_url', ''))
-                    self.ollama_model_entry.delete(0, tk.END)
-                    self.ollama_model_entry.insert(0, self.settings.ollama.get('model', ''))
+        # Управление стратегиями
+        self._setup_strategy_control_ui(left_panel)
 
-                    # Загрузка настроек рисков
-                    risk_settings = self.settings.risk_management
-                    self.risk_per_trade_spin.delete(0, tk.END)
-                    self.risk_per_trade_spin.insert(0, str(risk_settings.get('risk_per_trade', 1.0)))
-                    self.risk_all_trades_spin.delete(0, tk.END)
-                    self.risk_all_trades_spin.insert(0, str(risk_settings.get('risk_all_trades', 5.0)))
-                    self.daily_risk_spin.delete(0, tk.END)
-                    self.daily_risk_spin.insert(0, str(risk_settings.get('daily_risk', 10.0)))
+        # Кнопки управления
+        self._setup_control_buttons(left_panel)
 
-                def _save_settings(self):
-                    """Полностью прописанная функция сохранения настроек"""
-                    # Сохраняем MT5 аккаунт
-                    current_account = {
-                        'login': self.account_manager.login_entry.get(),
-                        'password': self.account_manager.password_entry.get(),
-                        'server': self.account_manager.server_entry.get(),
-                        'path': self.account_manager.path_entry.get()
-                    }
+        # Логирование
+        self._setup_log_viewer(right_panel)
 
-                    # Обновляем текущий аккаунт в настройках
-                    if current_account['login']:  # Если есть логин, сохраняем аккаунт
-                        if not any(acc['login'] == current_account['login'] for acc in self.settings.accounts):
-                            self.settings.accounts.append(current_account)
-                        self.settings.set_current_account(len(self.settings.accounts) - 1)
+    def _setup_account_ui(self, parent_frame):
+        """Настройка UI компонентов для управления аккаунтами"""
+        self.account_frame = ttk.LabelFrame(parent_frame, text="Управление аккаунтами MT5", padding="10")
+        self.account_frame.pack(fill=tk.X, pady=5)
 
-                    # Сохраняем Telegram настройки
-                    self.settings._settings['telegram'] = {
-                        'token': self.account_manager.telegram_token_entry.get(),
-                        'chat_id': self.account_manager.chat_id_entry.get()
-                    }
+        ttk.Label(self.account_frame, text="Аккаунт:").grid(row=0, column=0, sticky=tk.W)
+        self.account_combobox = ttk.Combobox(self.account_frame, state="readonly")
+        self.account_combobox.grid(row=0, column=1, sticky=tk.EW, padx=5)
+        self.account_combobox.bind("<<ComboboxSelected>>", self._on_account_select)
 
-                    # Сохраняем Ollama настройки
-                    self.settings._settings['ollama'] = {
-                        'base_url': self.ollama_url_entry.get(),
-                        'model': self.ollama_model_entry.get()
-                    }
+        fields = [
+            ("Логин:", "login_entry", ""),
+            ("Пароль:", "password_entry", "*"),
+            ("Сервер:", "server_entry", ""),
+            ("Путь к MT5:", "path_entry", "")
+        ]
 
-                    # Сохраняем настройки рисков
-                    self.settings._settings['risk_management'] = {
-                        'risk_per_trade': float(self.risk_per_trade_spin.get()),
-                        'risk_all_trades': float(self.risk_all_trades_spin.get()),
-                        'daily_risk': float(self.daily_risk_spin.get())
-                    }
+        for i, (label, attr_name, show_char) in enumerate(fields, start=1):
+            ttk.Label(self.account_frame, text=label).grid(row=i, column=0, sticky=tk.W)
+            entry = ttk.Entry(self.account_frame, show=show_char)
+            entry.grid(row=i, column=1, sticky=tk.EW, padx=5)
+            setattr(self, attr_name, entry)
 
-                    # Сохраняем все настройки в файл
-                    self.settings.save()
-                    self.logger.info("Все настройки успешно сохранены")
+            if label == "Путь к MT5:":
+                ttk.Button(self.account_frame, text="Обзор", command=self._browse_mt5_path).grid(
+                    row=i, column=2, padx=5
+                )
 
-                with open(self.config_path, 'r', encoding='utf-8') as f:
-                    loaded = json.load(f)
+        btn_frame = ttk.Frame(self.account_frame)
+        btn_frame.grid(row=len(fields) + 1, column=0, columnspan=3, pady=(5, 0))
 
-                    # Миграция старых настроек из формата mt5 в accounts
-                    if "mt5" in loaded and loaded["mt5"]:
-                        if "accounts" not in loaded:
-                            loaded["accounts"] = []
+        buttons = [
+            ("Добавить аккаунт", self._add_account),
+            ("Удалить аккаунт", self._remove_account),
+            ("Подключиться", self._connect_mt5)
+        ]
 
-                        loaded["accounts"].append({
-                            "login": loaded["mt5"].get("login", ""),
-                            "password": loaded["mt5"].get("password", ""),
-                            "server": loaded["mt5"].get("server", ""),
-                            "path": loaded["mt5"].get("path", "")
-                        })
-                        self.logger.debug("Выполнена миграция старых настроек MT5 в новый формат")
-                        del loaded["mt5"]  # Удаляем старый формат после миграции
+        for text, command in buttons:
+            ttk.Button(btn_frame, text=text, command=command).pack(
+                side=tk.LEFT if text != "Подключиться" else tk.RIGHT, padx=2
+            )
 
-                    return loaded
-
-            def save(self):
-                self.config_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self.config_path, 'w', encoding='utf-8') as f:
-                    json.dump(self._settings, f, indent=4, ensure_ascii=False)
-
-            @property
-            def accounts(self) -> List[Dict]:
-                return self._settings.get("accounts", [])
-
-            @property
-            def current_account(self) -> Dict:
-                idx = self._settings.get("current_account_index", 0)
-                return self.accounts[idx] if self.accounts else {
-                    "login": "", "password": "", "server": "", "path": ""
-                }
-
-            def add_account(self, login: str, password: str, server: str, path: str):
-                if not any(acc["login"] == login for acc in self.accounts):
-                    self._settings["accounts"].append({
-                        "login": login,
-                        "password": password,
-                        "server": server,
-                        "path": path
-                    })
-                    self.save()
-
-            def set_current_account(self, index: int):
-                if 0 <= index < len(self.accounts):
-                    self._settings["current_account_index"] = index
-                    self.save()
-
-
-
-        # Настройки Telegram
-        telegram_frame = ttk.LabelFrame(left_panel, text="Telegram уведомления", padding="10")
+    def _setup_telegram_ui(self, parent_frame):
+        """Создание интерфейса Telegram бота"""
+        telegram_frame = ttk.LabelFrame(parent_frame, text="Telegram уведомления", padding="10")
         telegram_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(telegram_frame, text="Токен бота:").grid(row=0, column=0, sticky=tk.W)
@@ -325,14 +139,16 @@ class TradingAssistantApp:
         self.telegram_token_entry.grid(row=0, column=1, sticky=tk.EW, padx=5)
 
         ttk.Label(telegram_frame, text="Chat ID:").grid(row=1, column=0, sticky=tk.W)
-        self.telegram_chat_id_entry = ttk.Entry(telegram_frame)
-        self.telegram_chat_id_entry.grid(row=1, column=1, sticky=tk.EW, padx=5)
+        self.chat_id_entry = ttk.Entry(telegram_frame)
+        self.chat_id_entry.grid(row=1, column=1, sticky=tk.EW, padx=5)
 
-        ttk.Button(telegram_frame, text="Тест уведомления", command=self._test_telegram).grid(row=2, column=0,
-                                                                                              columnspan=2, pady=5)
+        ttk.Button(telegram_frame, text="Тест уведомления", command=self._test_telegram).grid(
+            row=2, column=0, columnspan=2, pady=5
+        )
 
-        # Настройки Ollama
-        ollama_frame = ttk.LabelFrame(left_panel, text="Ollama интеграция", padding="10")
+    def _setup_ollama_ui(self, parent_frame):
+        """Создание интерфейса Ollama интеграции"""
+        ollama_frame = ttk.LabelFrame(parent_frame, text="Ollama интеграция", padding="10")
         ollama_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(ollama_frame, text="URL сервера:").grid(row=0, column=0, sticky=tk.W)
@@ -343,12 +159,13 @@ class TradingAssistantApp:
         self.ollama_model_entry = ttk.Entry(ollama_frame)
         self.ollama_model_entry.grid(row=1, column=1, sticky=tk.EW, padx=5)
 
-        ttk.Button(ollama_frame, text="Загрузить базу знаний", command=self._load_knowledge_base).grid(row=2, column=0,
-                                                                                                       columnspan=2,
-                                                                                                       pady=5)
+        ttk.Button(ollama_frame, text="Загрузить базу знаний", command=self._load_knowledge_base).grid(
+            row=2, column=0, columnspan=2, pady=5
+        )
 
-        # Управление рисками
-        risk_frame = ttk.LabelFrame(left_panel, text="Управление рисками", padding="10")
+    def _setup_risk_management_ui(self, parent_frame):
+        """Создание интерфейса управления рисками"""
+        risk_frame = ttk.LabelFrame(parent_frame, text="Управление рисками", padding="10")
         risk_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(risk_frame, text="Риск на сделку (%):").grid(row=0, column=0, sticky=tk.W)
@@ -363,23 +180,26 @@ class TradingAssistantApp:
         self.daily_risk_spin = ttk.Spinbox(risk_frame, from_=1, to=100, increment=1)
         self.daily_risk_spin.grid(row=2, column=1, sticky=tk.EW, padx=5)
 
-        ttk.Button(risk_frame, text="Применить", command=self._update_risk_settings).grid(row=3, column=0, columnspan=2,
-                                                                                          pady=5)
+        ttk.Button(risk_frame, text="Применить", command=self._update_risk_settings).grid(
+            row=3, column=0, columnspan=2, pady=5
+        )
 
-        # Управление стратегиями
-        strategies_frame = ttk.LabelFrame(left_panel, text="Торговые стратегии", padding="10")
+    def _setup_strategy_control_ui(self, parent_frame):
+        """Создание интерфейса управления стратегиями"""
+        strategies_frame = ttk.LabelFrame(parent_frame, text="Торговые стратегии", padding="10")
         strategies_frame.pack(fill=tk.X, pady=5)
 
         self.strategy_vars = {}
         for i, (name, strategy) in enumerate(self.strategies.items()):
-            var = tk.BooleanVar()
+            var = tk.BooleanVar(value=strategy.enabled)
             chk = ttk.Checkbutton(strategies_frame, text=name, variable=var,
                                   command=lambda n=name, v=var: self._toggle_strategy(n, v))
             chk.grid(row=i, column=0, sticky=tk.W)
             self.strategy_vars[name] = var
 
-        # Кнопки управления
-        control_frame = ttk.Frame(left_panel, padding="10")
+    def _setup_control_buttons(self, parent_frame):
+        """Создание кнопок управления"""
+        control_frame = ttk.Frame(parent_frame, padding="10")
         control_frame.pack(fill=tk.X, pady=5)
 
         stats_btn = ttk.Button(control_frame, text="Статистика", command=self._show_trade_statistics)
@@ -391,8 +211,9 @@ class TradingAssistantApp:
         self.stop_btn = ttk.Button(control_frame, text="Стоп", command=self._stop_trading, state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=5)
 
-        # Лог
-        log_frame = ttk.LabelFrame(right_panel, text="Лог", padding="10")
+    def _setup_log_viewer(self, parent_frame):
+        """Создание текстового поля лога"""
+        log_frame = ttk.LabelFrame(parent_frame, text="Лог", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True)
 
         self.log_text = tk.Text(log_frame, wrap=tk.WORD, state=tk.DISABLED)
@@ -402,227 +223,209 @@ class TradingAssistantApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.config(yscrollcommand=scrollbar.set)
 
-        # Перенаправление логов в текстовое поле
-        self.logger.logger.addHandler(self._create_text_handler())
+    def _connect_mt5(self):
+        """Подключение к MT5"""
+        login = self.login_entry.get().strip()
+        password = self.password_entry.get().strip()
+        server = self.server_entry.get().strip()
+        path = self.path_entry.get().strip()
 
-    def _create_text_handler(self):
-        """Создание обработчика логов для Text виджета"""
+        if not all([login, password, server, path]):
+            self.logger.warning("Попытка подключения с неполными данными")
+            messagebox.showerror("Ошибка", "Заполните все поля подключения к MT5")
+            return
 
-        class TextHandler(logging.Handler):
-            def __init__(self, text_widget):
-                super().__init__()
-                self.text_widget = text_widget
+        if not login.isdigit():
+            self.logger.error("Логин должен быть числом")
+            messagebox.showerror("Ошибка", "Логин должен быть числом")
+            return
 
-            def emit(self, record):
-                msg = self.format(record)
-                self.text_widget.config(state=tk.NORMAL)
-                self.text_widget.insert(tk.END, msg + "\n")
-                self.text_widget.config(state=tk.DISABLED)
-                self.text_widget.see(tk.END)
+        try:
+            connected = self.mt5_client.connect(login, password, server, path)
+            if connected:
+                messagebox.showinfo("Успех", "Подключение к MT5 установлено")
+                self._save_settings()
+            else:
+                error_msg = self.mt5_client.last_error() if hasattr(self.mt5_client, 'last_error') else "Неизвестная ошибка"
+                messagebox.showerror("Ошибка", f"Не удалось подключиться: {error_msg}")
+        except Exception as e:
+            self.logger.error(f"Критическая ошибка при подключении: {str(e)}")
+            messagebox.showerror("Ошибка", f"Системная ошибка: {str(e)}")
 
-        handler = TextHandler(self.log_text)
-        handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        return handler
+    def _update_accounts_dropdown(self):
+        """Обновление выпадающего списка аккаунтов"""
+        accounts = self.settings.accounts
+        values = [f"{acc['login']}@{acc['server']}" for acc in accounts]
+        self.account_combobox["values"] = values
+        if accounts:
+            self.account_combobox.current(self.settings.current_account_index)
+            self.logger.info("Список аккаунтов обновлен")
 
-    def _load_settings(self):
-        """Загрузка настроек в интерфейс"""
-        # MT5
-        self.login_entry.insert(0, self.settings.mt5.get('login', ''))
-        self.password_entry.insert(0, self.settings.mt5.get('password', ''))
-        self.server_entry.insert(0, self.settings.mt5.get('server', ''))
-        self.path_entry.insert(0, self.settings.mt5.get('path', ''))
+    def _on_account_select(self, event=None):
+        """Обработчик выбора аккаунта"""
+        idx = self.account_combobox.current()
+        if idx >= 0:
+            account = self.settings.accounts[idx]
+            self.login_entry.delete(0, tk.END)
+            self.login_entry.insert(0, account.get('login', ''))
+            self.password_entry.delete(0, tk.END)
+            self.password_entry.insert(0, account.get('password', ''))
+            self.server_entry.delete(0, tk.END)
+            self.server_entry.insert(0, account.get('server', ''))
+            self.path_entry.delete(0, tk.END)
+            self.path_entry.insert(0, account.get('path', ''))
+            self.settings.set_current_account(idx)
+            self.logger.info(f"Выбран аккаунт: {account['login']}")
 
-        # Telegram
-        self.telegram_token_entry.insert(0, self.settings.telegram.get('token', ''))
-        self.telegram_chat_id_entry.insert(0, self.settings.telegram.get('chat_id', ''))
+    def _add_account(self):
+        """Добавление нового аккаунта"""
+        account_data = {
+            "login": self.login_entry.get(),
+            "password": self.password_entry.get(),
+            "server": self.server_entry.get(),
+            "path": self.path_entry.get()
+        }
+        if not all(account_data.values()):
+            self.logger.warning("Попытка добавить аккаунт с незаполненными данными")
+            messagebox.showerror("Ошибка", "Заполните все поля аккаунта")
+            return
 
-        # Ollama
-        self.ollama_url_entry.insert(0, self.settings.ollama.get('base_url', ''))
-        self.ollama_model_entry.insert(0, self.settings.ollama.get('model', ''))
-
-        # Риск-менеджмент
-        risk_settings = self.settings.risk_management
-        self.risk_per_trade_spin.set(risk_settings.get('risk_per_trade', 1.0))
-        self.risk_all_trades_spin.set(risk_settings.get('risk_all_trades', 5.0))
-        self.daily_risk_spin.set(risk_settings.get('daily_risk', 10.0))
-
-        # Обновляем менеджер рисков
-        self.risk_manager.update_settings(
-            float(self.risk_per_trade_spin.get()),
-            float(self.risk_all_trades_spin.get()),
-            float(self.daily_risk_spin.get())
-        )
+        if self.settings.add_account(**account_data):
+            self._update_accounts_dropdown()
+            messagebox.showinfo("Успех", "Аккаунт сохранен")
+            self.logger.info(f"Добавлен новый аккаунт: {account_data['login']}")
+        else:
+            messagebox.showerror("Ошибка", "Не удалось сохранить аккаунт")
 
     def _save_settings(self):
         """Сохранение настроек из интерфейса"""
-        # MT5
-        self.settings._settings['mt5'] = {
+        current_account = {
             'login': self.login_entry.get(),
             'password': self.password_entry.get(),
             'server': self.server_entry.get(),
             'path': self.path_entry.get()
         }
 
-        # Telegram
-        self.settings._settings['telegram'] = {
+        self.settings._settings["mt5"] = current_account
+        self.settings._settings["telegram"] = {
             'token': self.telegram_token_entry.get(),
-            'chat_id': self.telegram_chat_id_entry.get()
+            'chat_id': self.chat_id_entry.get()
         }
-
-        # Ollama
-        self.settings._settings['ollama'] = {
+        self.settings._settings["ollama"] = {
             'base_url': self.ollama_url_entry.get(),
             'model': self.ollama_model_entry.get()
         }
-
-        # Риск-менеджмент
-        self.settings._settings['risk_management'] = {
+        self.settings._settings["risk_management"] = {
             'risk_per_trade': float(self.risk_per_trade_spin.get()),
             'risk_all_trades': float(self.risk_all_trades_spin.get()),
             'daily_risk': float(self.daily_risk_spin.get())
         }
 
-        self.settings.save()
-        self.logger.info("Настройки сохранены")
-
-    def _browse_mt5_path(self):
-        """Выбор пути к MT5"""
-        path = filedialog.askopenfilename(
-            title="Выберите исполняемый файл MT5",
-            filetypes=[("Executable files", "*.exe"), ("All files", "*.*")]
-        )
-        if path:
-            self.path_entry.delete(0, tk.END)
-            self.path_entry.insert(0, path)
-
-    def _connect_mt5(self):
-        """Подключение к MT5"""
-        login = self.login_entry.get()
-        password = self.password_entry.get()
-        server = self.server_entry.get()
-        path = self.path_entry.get()
-
-        if not all([login, password, server, path]):
-            messagebox.showerror("Ошибка", "Заполните все поля для подключения к MT5")
-            return
-
-        if self.mt5_client.connect(login, password, server, path):
-            messagebox.showinfo("Успех", "Успешное подключение к MT5")
-            self._save_settings()
-        else:
-            messagebox.showerror("Ошибка", "Не удалось подключиться к MT5")
-
-    def _update_accounts_dropdown(self):
-        """Обновляет список аккаунтов в выпадающем меню"""
-        accounts = self.settings.accounts
-        self.account_combobox["values"] = [
-            f"{acc['login']}@{acc['server']}" for acc in accounts
-        ]
-        if accounts:
-            self.account_combobox.current(self.settings.current_account_index)
-
-    def _on_account_select(self, event=None):
-        """Загружает данные выбранного аккаунта в форму"""
-        idx = self.account_combobox.current()
-        if idx >= 0:
-            account = self.settings.accounts[idx]
-            self.login_entry.delete(0, tk.END)
-            self.login_entry.insert(0, account["login"])
-            self.password_entry.delete(0, tk.END)
-            self.password_entry.insert(0, account["password"])
-            self.server_entry.delete(0, tk.END)
-            self.server_entry.insert(0, account["server"])
-            self.path_entry.delete(0, tk.END)
-            self.path_entry.insert(0, account["path"])
-            self.settings.set_current_account(idx)
-
-    def _add_account(self):
-        """Добавляет новый аккаунт в список"""
-        login = self.login_entry.get()
-        password = self.password_entry.get()
-        server = self.server_entry.get()
-        path = self.path_entry.get()
-
-        if not all([login, password, server, path]):
-            messagebox.showerror("Ошибка", "Заполните все поля")
-            return
-
-        self.settings.add_account(login, password, server, path)
-        self._update_accounts_dropdown()
-        messagebox.showinfo("Успех", "Аккаунт сохранен")
-
-    def _remove_account(self):
-        """Удаляет выбранный аккаунт"""
-        idx = self.account_combobox.current()
-        if idx >= 0:
-            self.settings._settings["accounts"].pop(idx)
+        try:
             self.settings.save()
-            self._update_accounts_dropdown()
-            self._clear_account_fields()
-            messagebox.showinfo("Успех", "Аккаунт удален")
-
-    def _clear_account_fields(self):
-        """Очищает поля ввода аккаунта"""
-        for entry in [self.login_entry, self.password_entry, self.server_entry, self.path_entry]:
-            entry.delete(0, tk.END)
+            self.logger.info("Настройки успешно сохранены")
+        except Exception as e:
+            self.logger.error(f"Ошибка сохранения настроек: {str(e)}")
+            messagebox.showerror("Ошибка", f"Не удалось сохранить настройки: {str(e)}")
 
     def _load_settings(self):
-        """Загружает настройки в интерфейс (обновленная версия)"""
-        # Загружаем текущий аккаунт
-        current = self.settings.current_account
-        self.login_entry.insert(0, current.get("login", ""))
-        self.password_entry.insert(0, current.get("password", ""))
-        self.server_entry.insert(0, current.get("server", ""))
-        self.path_entry.insert(0, current.get("path", ""))
+        """Загрузка настроек в интерфейс"""
+        # MT5
+        mt5_acc = self.settings.current_account
+        self.login_entry.delete(0, tk.END)
+        self.login_entry.insert(0, mt5_acc.get('login', ''))
+        self.password_entry.delete(0, tk.END)
+        self.password_entry.insert(0, mt5_acc.get('password', ''))
+        self.server_entry.delete(0, tk.END)
+        self.server_entry.insert(0, mt5_acc.get('server', ''))
+        self.path_entry.delete(0, tk.END)
+        self.path_entry.insert(0, mt5_acc.get('path', ''))
 
-        # Обновляем выпадающий список
-        self._update_accounts_dropdown()
+        # Telegram
+        telegram = self.settings.telegram or {}
+        self.telegram_token_entry.delete(0, tk.END)
+        self.telegram_token_entry.insert(0, telegram.get('token', ''))
+        self.chat_id_entry.delete(0, tk.END)
+        self.chat_id_entry.insert(0, telegram.get('chat_id', ''))
 
-        # Остальные настройки (Telegram, Ollama и т.д.)
-        self.telegram_token_entry.insert(0, self.settings.telegram.get("token", ""))
+        # Ollama
+        ollama = self.settings.ollama or {}
+        self.ollama_url_entry.delete(0, tk.END)
+        self.ollama_url_entry.insert(0, ollama.get('base_url', ''))
+        self.ollama_model_entry.delete(0, tk.END)
+        self.ollama_model_entry.insert(0, ollama.get('model', ''))
+
+        # Риски
+        risk = self.settings.risk_management or {}
+        self.risk_per_trade_spin.set(risk.get('risk_per_trade', 1.0))
+        self.risk_all_trades_spin.set(risk.get('risk_all_trades', 5.0))
+        self.daily_risk_spin.set(risk.get('daily_risk', 10.0))
+
+        # Обновляем менеджер рисков
+        try:
+            self.risk_manager.update_settings(
+                float(self.risk_per_trade_spin.get()),
+                float(self.risk_all_trades_spin.get()),
+                float(self.daily_risk_spin.get())
+            )
+        except ValueError as e:
+            self.logger.warning(f"Некорректные параметры риска при загрузке: {str(e)}")
 
     def _test_telegram(self):
         """Тестовая отправка уведомления в Telegram"""
-        token = self.telegram_token_entry.get()
-        chat_id = self.telegram_chat_id_entry.get()
-
+        token = self.telegram_token_entry.get().strip()
+        chat_id = self.chat_id_entry.get().strip()
         if not token or not chat_id:
             messagebox.showerror("Ошибка", "Заполните токен и chat_id для Telegram")
             return
 
-        self.telegram_bot = TelegramBot(token, chat_id, self.logger)
-        if self.telegram_bot.send_message("Тестовое уведомление от Trading Assistant"):
-            messagebox.showinfo("Успех", "Тестовое уведомление отправлено")
-            self._save_settings()
-        else:
-            messagebox.showerror("Ошибка", "Не удалось отправить уведомление")
+        try:
+            bot = TelegramBot(self._app_logger)
+            bot.initialize(token, chat_id)
+            if bot.send_message("Тестовое уведомление от Trading Assistant"):
+                messagebox.showinfo("Успех", "Тестовое уведомление отправлено")
+                self.settings.telegram = {'token': token, 'chat_id': chat_id}
+                self.settings.save()
+            else:
+                messagebox.showerror("Ошибка", "Не удалось отправить тестовое сообщение")
+        except Exception as e:
+            self.logger.error(f"Ошибка тестирования Telegram: {str(e)}")
+            messagebox.showerror("Ошибка", f"Не удалось подключить Telegram: {str(e)}")
 
     def _load_knowledge_base(self):
-        """Загрузка базы знаний"""
+        """Загрузка базы знаний для Ollama"""
         files = filedialog.askopenfilenames(
             title="Выберите файлы базы знаний",
             filetypes=[("Text files", "*.txt"), ("PDF files", "*.pdf"), ("All files", "*.*")]
         )
-
         if not files:
             return
 
-        ollama_url = self.ollama_url_entry.get()
-        ollama_model = self.ollama_model_entry.get()
+        ollama_url = self.ollama_url_entry.get().strip()
+        ollama_model = self.ollama_model_entry.get().strip()
 
         if not ollama_url or not ollama_model:
             messagebox.showerror("Ошибка", "Заполните URL и модель Ollama")
             return
 
-        self.ollama = OllamaIntegration(ollama_url, ollama_model, self.logger)
+        try:
+            if not self.ollama or self.ollama.base_url != ollama_url or self.ollama.model != ollama_model:
+                self.ollama = OllamaIntegration(ollama_url, ollama_model, self._app_logger)
 
-        success_count = 0
-        for file_path in files:
-            if self.ollama.load_knowledge(file_path):
-                success_count += 1
+            success_count = 0
+            for file_path in files:
+                if self.ollama.load_knowledge(file_path):
+                    success_count += 1
 
-        messagebox.showinfo("Результат", f"Успешно загружено {success_count} из {len(files)} файлов")
-        self._save_settings()
+            messagebox.showinfo("Результат", f"Загружено {success_count} из {len(files)} файлов")
+            self.settings.ollama = {
+                'base_url': ollama_url,
+                'model': ollama_model
+            }
+            self.settings.save()
+        except Exception as e:
+            self.logger.error(f"Ошибка загрузки базы знаний: {str(e)}")
+            messagebox.showerror("Ошибка", f"Не удалось загрузить файлы: {str(e)}")
 
     def _update_risk_settings(self):
         """Обновление параметров риск-менеджмента"""
@@ -632,13 +435,14 @@ class TradingAssistantApp:
             daily_risk = float(self.daily_risk_spin.get())
 
             if not (0 < risk_per_trade <= 100 and 0 < risk_all_trades <= 100 and 0 < daily_risk <= 100):
-                raise ValueError("Значения риска должны быть между 0 и 100")
+                raise ValueError("Все значения риска должны быть между 0 и 100")
 
             self.risk_manager.update_settings(risk_per_trade, risk_all_trades, daily_risk)
             self._save_settings()
-            messagebox.showinfo("Успех", "Параметры риска обновлены")
+            messagebox.showinfo("Успех", "Настройки риск-менеджмента обновлены")
         except ValueError as e:
-            messagebox.showerror("Ошибка", str(e))
+            self.logger.error(f"Ошибка валидации рисков: {str(e)}")
+            messagebox.showerror("Ошибка", f"Некорректные значения рисков: {str(e)}")
 
     def _toggle_strategy(self, name: str, var: tk.BooleanVar):
         """Включение/выключение стратегии"""
@@ -647,117 +451,100 @@ class TradingAssistantApp:
             strategy.enable()
         else:
             strategy.disable()
+        self.logger.info(f"Стратегия '{name}' {'активирована' if var.get() else 'деактивирована'}")
 
     def _start_trading(self):
-        """Запуск торгового ассистента"""
+        """Запуск торговой системы"""
         if not self.mt5_client.connected:
             messagebox.showerror("Ошибка", "Сначала подключитесь к MT5")
             return
 
-        # Проверяем, что хотя бы одна стратегия активна
         active_strategies = [name for name, var in self.strategy_vars.items() if var.get()]
         if not active_strategies:
             messagebox.showerror("Ошибка", "Выберите хотя бы одну стратегию")
             return
 
-        # Инициализируем Telegram бота, если заданы настройки
-        token = self.telegram_token_entry.get()
-        chat_id = self.telegram_chat_id_entry.get()
-        if token and chat_id:
-            self.telegram_bot = TelegramBot(token, chat_id, self.logger)
-
         self.is_running = True
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
-
         self.logger.info("Торговый ассистент запущен")
+
         if self.telegram_bot:
             self.telegram_bot.send_message("🟢 Торговый ассистент запущен")
 
-        # Запускаем цикл обновления
         self._update_trading()
 
     def _stop_trading(self):
-        """Остановка торгового ассистента"""
+        """Остановка торговой системы"""
         self.is_running = False
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
-
         self.logger.info("Торговый ассистент остановлен")
+
         if self.telegram_bot:
             self.telegram_bot.send_message("🔴 Торговый ассистент остановлен")
 
     def _update_trading(self):
-        """Основной цикл торговли"""
+        """Основной цикл обновления анализа"""
         if not self.is_running:
             return
 
         try:
-            # Получаем информацию о счете
             account_info = self.mt5_client.get_account_info()
             if not account_info:
                 self.logger.error("Не удалось получить информацию о счете")
                 return
 
-            # Проверяем дневные лимиты
             if not self.risk_manager.check_daily_limits():
                 self._stop_trading()
                 return
 
-            # Анализируем рынок для каждой стратегии
             for name, strategy in self.strategies.items():
                 if not strategy.enabled:
                     continue
 
-                # Здесь должна быть логика анализа и торговли для каждой стратегии
-                # В реальном приложении это будет более сложный код
-                self.logger.info(f"Анализ по стратегии {name}")
+                data = self.mt5_client.get_historical_data("EURUSD", Timeframes.H1, 100)
+                if data is None:
+                    self.logger.warning("Нет исторических данных для анализа")
+                    continue
 
-                # Пример: анализ одного символа
-                symbol = "EURUSD"
-                timeframe = Timeframes.H1
-                data = self.mt5_client.get_historical_data(symbol, timeframe, 100)
-
-                if data is not None:
-                    signal = strategy.analyze(symbol, timeframe, data)
-                    if signal:
-                        self._process_signal(signal, name)
+                signal = strategy.analyze("EURUSD", Timeframes.H1, data)
+                if signal:
+                    self._process_signal(signal, name)
 
         except Exception as e:
-            self.logger.error(f"Ошибка в цикле торговли: {str(e)}")
+            self.logger.error(f"Ошибка в торговом цикле: {str(e)}")
             if self.telegram_bot:
-                self.telegram_bot.notify_error(f"Ошибка в цикле торговли: {str(e)}")
+                self.telegram_bot.notify_error(f"Ошибка в торговом цикле: {str(e)}")
+
         finally:
             if self.is_running:
                 self.root.after(self.update_interval, self._update_trading)
 
-    def _process_signal(self, signal: Dict, strategy_name: str):
+    def _process_signal(self, signal: dict, strategy_name: str):
         """Обработка торгового сигнала"""
-        symbol = signal['symbol']
-        action = signal['action']
-        stop_loss = signal['stop_loss']
-        take_profit = signal['take_profit']
+        symbol = signal.get('symbol')
+        action = signal.get('action')
+        price = signal.get('price')
+        stop_loss = signal.get('stop_loss')
+        take_profit = signal.get('take_profit')
 
-        # Рассчитываем объем позиции на основе риска
-        price = signal['price']
+        if not all([symbol, action, price, stop_loss, take_profit]):
+            self.logger.warning("Получен некорректный сигнал от стратегии")
+            return
+
         stop_loss_pips = abs(price - stop_loss) / self.mt5_client.get_symbol_info(symbol).point
-
         volume = self.risk_manager.calculate_position_size(symbol, stop_loss_pips)
         if not volume:
             return
 
-        # Проверяем общий риск
-        if not self.risk_manager.check_all_trades_risk():
-            return
-
-        # Размещаем ордер
         order_id = self.mt5_client.place_order(
             symbol=symbol,
             action=action,
             volume=volume,
             stop_loss=stop_loss,
             take_profit=take_profit,
-            comment=f"Strategy: {strategy_name}"
+            comment=f"Стратегия: {strategy_name}"
         )
 
         if order_id and self.telegram_bot:
@@ -770,3 +557,290 @@ class TradingAssistantApp:
                 take_profit=take_profit,
                 strategy=strategy_name
             )
+
+    def _browse_mt5_path(self):
+        """Выбор пути к MT5"""
+        path = filedialog.askopenfilename(
+            title="Выберите terminal.exe",
+            filetypes=[("Исполняемые файлы", "*.exe"), ("Все файлы", "*.*")]
+        )
+        if path:
+            self.path_entry.delete(0, tk.END)
+            self.path_entry.insert(0, path)
+
+    def _show_trade_statistics(self):
+        """Отображение статистики сделок"""
+        if not self.risk_manager:
+            messagebox.showerror("Ошибка", "Менеджер рисков не инициализирован")
+            return
+
+        stats = self.risk_manager.get_trade_statistics(limit=100)
+        message = (
+            f"📊 Отчет за сегодня\n"
+            f"Сделок: {stats['total_trades']}\n"
+            f"Процент успешных: {stats['win_rate']:.1%}\n"
+            f"Средняя прибыль: {stats['avg_profit']:.2f}"
+        )
+        messagebox.showinfo("Статистика", message)
+
+    def _update_accounts_dropdown(self):
+        """Обновление выпадающего списка аккаунтов"""
+        accounts = self.settings.accounts
+        values = [f"{acc['login']}@{acc['server']}" for acc in accounts]
+        self.account_combobox["values"] = values
+        if accounts:
+            self.account_combobox.current(self.settings.current_account_index)
+
+    def _on_account_select(self, event=None):
+        """Обработчик выбора аккаунта"""
+        idx = self.account_combobox.current()
+        if idx >= 0:
+            account = self.settings.accounts[idx]
+            self.login_entry.delete(0, tk.END)
+            self.login_entry.insert(0, account.get('login', ''))
+            self.password_entry.delete(0, tk.END)
+            self.password_entry.insert(0, account.get('password', ''))
+            self.server_entry.delete(0, tk.END)
+            self.server_entry.insert(0, account.get('server', ''))
+            self.path_entry.delete(0, tk.END)
+            self.path_entry.insert(0, account.get('path', ''))
+            self.settings.set_current_account(idx)
+            self.logger.info(f"Выбран аккаунт {account['login']}")
+
+    def _add_account(self):
+        """Добавление аккаунта"""
+        account_data = {
+            "login": self.login_entry.get(),
+            "password": self.password_entry.get(),
+            "server": self.server_entry.get(),
+            "path": self.path_entry.get()
+        }
+
+        if not all(account_data.values()):
+            self.logger.warning("Попытка добавить аккаунт с неполными данными")
+            messagebox.showerror("Ошибка", "Заполните все поля аккаунта")
+            return
+
+        self.settings.add_account(**account_data)
+        self._update_accounts_dropdown()
+        messagebox.showinfo("Успех", "Аккаунт сохранен")
+        self.logger.info(f"Аккаунт {account_data['login']} добавлен")
+
+    def _remove_account(self):
+        """Удаление аккаунта"""
+        idx = self.account_combobox.current()
+        if idx >= 0:
+            account = self.settings.accounts[idx]
+            confirm = messagebox.askyesno("Подтверждение", f"Удалить аккаунт {account['login']}?")
+            if confirm:
+                self.settings.remove_account(idx)
+                self._update_accounts_dropdown()
+                self._clear_account_fields()
+                messagebox.showinfo("Успех", "Аккаунт удален")
+                self.logger.info(f"Аккаунт {account['login']} удален")
+
+    def _clear_account_fields(self):
+        """Очистка полей формы аккаунта"""
+        self.login_entry.delete(0, tk.END)
+        self.password_entry.delete(0, tk.END)
+        self.server_entry.delete(0, tk.END)
+        self.path_entry.delete(0, tk.END)
+
+    def _load_settings(self):
+        """Загрузка настроек в интерфейс"""
+        current = self.settings.current_account
+        self.login_entry.delete(0, tk.END)
+        self.login_entry.insert(0, current.get('login', ''))
+        self.password_entry.delete(0, tk.END)
+        self.password_entry.insert(0, current.get('password', ''))
+        self.server_entry.delete(0, tk.END)
+        self.server_entry.insert(0, current.get('server', ''))
+        self.path_entry.delete(0, tk.END)
+        self.path_entry.insert(0, current.get('path', ''))
+
+        # Telegram
+        self.telegram_token_entry.delete(0, tk.END)
+        self.telegram_token_entry.insert(0, self.settings.telegram.get('token', ''))
+        self.chat_id_entry.delete(0, tk.END)
+        self.chat_id_entry.insert(0, self.settings.telegram.get('chat_id', ''))
+
+        # Ollama
+        self.ollama_url_entry.delete(0, tk.END)
+        self.ollama_url_entry.insert(0, self.settings.ollama.get('base_url', ''))
+        self.ollama_model_entry.delete(0, tk.END)
+        self.ollama_model_entry.insert(0, self.settings.ollama.get('model', ''))
+
+        # Риски
+        risk_settings = self.settings.risk_management
+        self.risk_per_trade_spin.set(risk_settings.get('risk_per_trade', 1.0))
+        self.risk_all_trades_spin.set(risk_settings.get('risk_all_trades', 5.0))
+        self.daily_risk_spin.set(risk_settings.get('daily_risk', 10.0))
+        self.logger.debug("Настройки загружены в интерфейс")
+
+    def _save_settings(self):
+        """Сохранение настроек из интерфейса"""
+        # Сохраняем MT5 аккаунт
+        current_account = {
+            'login': self.login_entry.get(),
+            'password': self.password_entry.get(),
+            'server': self.server_entry.get(),
+            'path': self.path_entry.get()
+        }
+
+        if current_account['login']:
+            if not any(acc['login'] == current_account['login'] for acc in self.settings.accounts):
+                self.settings.accounts.append(current_account)
+            else:
+                self.settings.accounts[self.settings.current_account_index] = current_account
+
+        # Сохраняем Telegram
+        self.settings.telegram = {
+            'token': self.telegram_token_entry.get(),
+            'chat_id': self.chat_id_entry.get()
+        }
+
+        # Сохраняем Ollama
+        self.settings.ollama = {
+            'base_url': self.ollama_url_entry.get(),
+            'model': self.ollama_model_entry.get()
+        }
+
+        # Сохраняем риск-параметры
+        self.settings.risk_management = {
+            'risk_per_trade': float(self.risk_per_trade_spin.get()),
+            'risk_all_trades': float(self.risk_all_trades_spin.get()),
+            'daily_risk': float(self.daily_risk_spin.get())
+        }
+
+        self.settings.save()
+        self.logger.info("Настройки сохранены")
+
+    def _update_risk_settings(self):
+        """Обновление параметров риск-менеджмента"""
+        try:
+            risk_per_trade = float(self.risk_per_trade_spin.get())
+            risk_all_trades = float(self.risk_all_trades_spin.get())
+            daily_risk = float(self.daily_risk_spin.get())
+
+            if not (0.1 <= risk_per_trade <= 5.0):
+                raise ValueError("Риск на сделку должен быть между 0.1 и 5.0")
+            if not (risk_per_trade <= risk_all_trades <= 20.0):
+                raise ValueError("Риск на все сделки должен быть >= риска на сделку и <= 20.0")
+            if not (risk_all_trades <= daily_risk <= 50.0):
+                raise ValueError("Дневной риск должен быть >= общего риска и <= 50.0")
+
+            self.risk_manager.update_settings(risk_per_trade, risk_all_trades, daily_risk)
+            self._save_settings()
+            messagebox.showinfo("Успех", "Параметры риск-менеджмента обновлены")
+        except ValueError as e:
+            messagebox.showerror("Ошибка", str(e))
+
+    def _test_telegram(self):
+        """Тестовая отправка через Telegram"""
+        token = self.telegram_token_entry.get()
+        chat_id = self.chat_id_entry.get()
+        if not token or not chat_id:
+            messagebox.showerror("Ошибка", "Заполните токен и chat_id для Telegram")
+            return
+
+        if self.telegram_bot is None or not self.telegram_bot.enabled:
+            self.telegram_bot = TelegramBot(self._app_logger)
+            self.telegram_bot.initialize(token, chat_id)
+        else:
+            self.telegram_bot.initialize(token, chat_id)
+
+        if self.telegram_bot.send_message("Тестовое уведомление от Trading Assistant"):
+            messagebox.showinfo("Успех", "Тестовое уведомление отправлено")
+            self._save_settings()
+        else:
+            messagebox.showerror("Ошибка", "Не удалось отправить тестовое уведомление")
+
+    def _load_knowledge_base(self):
+        """Загрузка базы знаний для Ollama"""
+        files = filedialog.askopenfilenames(
+            title="Выберите файлы базы знаний",
+            filetypes=[("Text files", "*.txt"), ("PDF files", "*.pdf"), ("All files", "*.*")]
+        )
+        if not files:
+            return
+
+        ollama_url = self.ollama_url_entry.get()
+        ollama_model = self.ollama_model_entry.get()
+        if not all([ollama_url, ollama_model]):
+            messagebox.showerror("Ошибка", "Заполните URL и модель Ollama")
+            return
+
+        if self.ollama is None or self.ollama.base_url != ollama_url or self.ollama.model != ollama_model:
+            self.ollama = OllamaIntegration(ollama_url, ollama_model, self._app_logger)
+
+        success_count = 0
+        for file_path in files:
+            if self.ollama.load_knowledge(file_path):
+                success_count += 1
+
+        messagebox.showinfo("Результат", f"Загружено {success_count} из {len(files)} файлов")
+
+    def _start_trading(self):
+        """Запуск торговой системы"""
+        if not self.mt5_client.connected:
+            messagebox.showerror("Ошибка", "Сначала подключитесь к MT5")
+            return
+
+        active_strategies = [name for name, var in self.strategy_vars.items() if var.get()]
+        if not active_strategies:
+            messagebox.showerror("Ошибка", "Выберите хотя бы одну стратегию")
+            return
+
+        self.is_running = True
+        self.start_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
+        self.logger.info("Торговый ассистент запущен")
+        if self.telegram_bot:
+            self.telegram_bot.send_message("🟢 Торговый ассистент запущен")
+
+    def _stop_trading(self):
+        """Остановка торговой системы"""
+        self.is_running = False
+        self.start_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+        self.logger.info("Торговый ассистент остановлен")
+        if self.telegram_bot:
+            self.telegram_bot.send_message("🔴 Торговый ассистент остановлен")
+
+    def _update_trading(self):
+        """Основной цикл обновления и анализа"""
+        if not self.is_running:
+            return
+
+        try:
+            account_info = self.mt5_client.get_account_info()
+            if not account_info:
+                self.logger.warning("Не удалось получить информацию о счете")
+                return
+
+            if self.daily_profit <= -self.daily_loss_limit:
+                self.logger.warning(f"Достигнут дневной лимит убытков: {self.daily_profit}/{self.daily_loss_limit}")
+                self._stop_trading()
+                return
+
+            # Здесь должна быть более сложная логика анализа
+            # Для примера используем простую проверку
+            for name, strategy in self.strategies.items():
+                if not strategy.enabled:
+                    continue
+                data = self.mt5_client.get_historical_data("EURUSD", Timeframes.H1, 100)
+                if data is None:
+                    self.logger.warning("Нет исторических данных для анализа")
+                    continue
+                signal = strategy.analyze("EURUSD", Timeframes.H1, data)
+                if signal:
+                    self._process_signal(signal, name)
+
+        except Exception as e:
+            self.logger.error(f"Ошибка в торговом цикле: {str(e)}")
+            if self.telegram_bot:
+                self.telegram_bot.notify_error(f"Ошибка в торговом цикле: {str(e)}")
+
+        finally:
+            if self.is_running:
+                self.root.after(self.update_interval, self._update_trading)
