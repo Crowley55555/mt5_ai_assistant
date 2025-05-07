@@ -8,6 +8,7 @@ class Settings:
         self.config_path = Path(config_path)
         self._settings = self._load_settings()
         self.logger = None  # Будет установлен извне
+        self._settings.setdefault('telegram', {'token': '', 'chat_id': ''})
 
     def get_database_config(self) -> Dict:
         """Возвращает конфиг БД с проверкой обязательных полей"""
@@ -91,3 +92,20 @@ class Settings:
         if 0 <= index < len(self.accounts):
             self._settings["current_account_index"] = index
             self.save()
+
+    @property
+    def telegram(self) -> Dict[str, str]:
+        return self._settings.get('telegram', {})
+
+    @property
+    def mt5(self) -> Dict:
+        """Для обратной совместимости"""
+        return self.current_account
+
+    @property
+    def ollama(self) -> Dict:
+        return self._settings.get('ollama', {})
+
+    @property
+    def risk_management(self) -> Dict:
+        return self._settings.get('risk_management', {})

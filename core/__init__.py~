@@ -61,7 +61,7 @@ def init_core_components(settings, logger):
         # Инициализация менеджера рисков
         components.risk_manager = RiskManager(components.mt5, logger)
 
-        # Инициализация Telegram ( отложенная)
+        # Инициализация Telegram (теперь отложенная)
         components.telegram = TelegramBot(logger)
         if settings.telegram.get('token'):
             components.telegram.initialize(

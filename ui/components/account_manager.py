@@ -9,6 +9,17 @@ class AccountManagerFrame(ttk.LabelFrame):
         super().__init__(master, text="Управление аккаунтами", **kwargs)
         self.db = db
         self._create_widgets()
+        self._add_telegram_fields()
+
+    def _add_telegram_fields(self):
+        """Добавляем поля для Telegram"""
+        ttk.Label(self, text="Telegram Token:").grid(row=5, column=0, sticky=tk.W)
+        self.telegram_token_entry = ttk.Entry(self)
+        self.telegram_token_entry.grid(row=5, column=1, sticky=tk.EW, padx=5)
+
+        ttk.Label(self, text="Chat ID:").grid(row=6, column=0, sticky=tk.W)
+        self.chat_id_entry = ttk.Entry(self)
+        self.chat_id_entry.grid(row=6, column=1, sticky=tk.EW, padx=5)
 
     def _create_widgets(self):
         # Combobox для выбора аккаунтов

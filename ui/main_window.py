@@ -8,7 +8,10 @@ from core.risk_manager import RiskManager
 from core.telegram_bot import TelegramBot
 from core.ollama_integration import OllamaIntegration
 from core.strategies import SniperStrategy, SmartSniperStrategy, SmartMoneyStrategy
-
+from config.constants import Timeframes
+import logging
+from pathlib import Path
+import shutil
 
 class TradingAssistantApp:
     def __init__(self, root: tk.Tk):
@@ -73,6 +76,20 @@ class TradingAssistantApp:
             for text, command in buttons:
                 ttk.Button(btn_frame, text=text, command=command).pack(
                     side=tk.LEFT if text != "Подключиться" else tk.RIGHT, padx=2)
+
+        def _show_trade_statistics(self):
+            """Показывает статистику сделок"""
+            if not hasattr(self, 'core') or not self.core.database:
+                messagebox.showerror("Ошибка", "База данных не подключена")
+                return
+
+            stats = self.core.risk_manager.get_trade_statistics()
+            messagebox.showinfo(
+                "Статистика",
+                f"Всего сделок: {stats['total_trades']}\n"
+                f"Процент прибыльных: {stats['win_rate']:.1%}\n"
+                f"Средняя прибыль: {stats['avg_profit']:.2f}"
+            )
 
         def _on_account_select(self, event=None):
             """Обработчик выбора аккаунта"""
@@ -166,7 +183,6 @@ class TradingAssistantApp:
 
         # Настройки подключения
         import json
-        from pathlib import Path
         from typing import Dict, List
 
         class Settings:
@@ -174,32 +190,98 @@ class TradingAssistantApp:
                 self.config_path = Path(config_path)
                 self._settings = self._load_settings()
 
-            def _load_settings(self) -> Dict:
-                default = {
-                    "accounts": [],
-                    "current_account_index": 0,
-                    "telegram": {"token": "", "chat_id": ""},
-                    "database": {"type": "sqlite", "connection_string": "sqlite:///data/trading.db"},
-                    "ollama": {"base_url": "http://localhost:11434", "model": "llama2"},
-                    "risk_management": {"risk_per_trade": 1.0, "risk_all_trades": 5.0, "daily_risk": 10.0}
-                }
+            def _load_settings(self):
+                def _load_settings(self):
+                    """Полностью прописанная функция загрузки настроек в интерфейс"""
+                    # Загрузка аккаунта MT5
+                    current_account = self.settings.current_account
+                    self.account_manager.login_entry.delete(0, tk.END)
+                    self.account_manager.login_entry.insert(0, current_account.get('login', ''))
+                    self.account_manager.password_entry.delete(0, tk.END)
+                    self.account_manager.password_entry.insert(0, current_account.get('password', ''))
+                    self.account_manager.server_entry.delete(0, tk.END)
+                    self.account_manager.server_entry.insert(0, current_account.get('server', ''))
+                    self.account_manager.path_entry.delete(0, tk.END)
+                    self.account_manager.path_entry.insert(0, current_account.get('path', ''))
 
-                if not self.config_path.exists():
-                    return default
+                    # Загрузка Telegram настроек
+                    self.account_manager.telegram_token_entry.delete(0, tk.END)
+                    self.account_manager.telegram_token_entry.insert(0, self.settings.telegram.get('token', ''))
+                    self.account_manager.chat_id_entry.delete(0, tk.END)
+                    self.account_manager.chat_id_entry.insert(0, self.settings.telegram.get('chat_id', ''))
+
+                    # Загрузка Ollama настроек
+                    self.ollama_url_entry.delete(0, tk.END)
+                    self.ollama_url_entry.insert(0, self.settings.ollama.get('base_url', ''))
+                    self.ollama_model_entry.delete(0, tk.END)
+                    self.ollama_model_entry.insert(0, self.settings.ollama.get('model', ''))
+
+                    # Загрузка настроек рисков
+                    risk_settings = self.settings.risk_management
+                    self.risk_per_trade_spin.delete(0, tk.END)
+                    self.risk_per_trade_spin.insert(0, str(risk_settings.get('risk_per_trade', 1.0)))
+                    self.risk_all_trades_spin.delete(0, tk.END)
+                    self.risk_all_trades_spin.insert(0, str(risk_settings.get('risk_all_trades', 5.0)))
+                    self.daily_risk_spin.delete(0, tk.END)
+                    self.daily_risk_spin.insert(0, str(risk_settings.get('daily_risk', 10.0)))
+
+                def _save_settings(self):
+                    """Полностью прописанная функция сохранения настроек"""
+                    # Сохраняем MT5 аккаунт
+                    current_account = {
+                        'login': self.account_manager.login_entry.get(),
+                        'password': self.account_manager.password_entry.get(),
+                        'server': self.account_manager.server_entry.get(),
+                        'path': self.account_manager.path_entry.get()
+                    }
+
+                    # Обновляем текущий аккаунт в настройках
+                    if current_account['login']:  # Если есть логин, сохраняем аккаунт
+                        if not any(acc['login'] == current_account['login'] for acc in self.settings.accounts):
+                            self.settings.accounts.append(current_account)
+                        self.settings.set_current_account(len(self.settings.accounts) - 1)
+
+                    # Сохраняем Telegram настройки
+                    self.settings._settings['telegram'] = {
+                        'token': self.account_manager.telegram_token_entry.get(),
+                        'chat_id': self.account_manager.chat_id_entry.get()
+                    }
+
+                    # Сохраняем Ollama настройки
+                    self.settings._settings['ollama'] = {
+                        'base_url': self.ollama_url_entry.get(),
+                        'model': self.ollama_model_entry.get()
+                    }
+
+                    # Сохраняем настройки рисков
+                    self.settings._settings['risk_management'] = {
+                        'risk_per_trade': float(self.risk_per_trade_spin.get()),
+                        'risk_all_trades': float(self.risk_all_trades_spin.get()),
+                        'daily_risk': float(self.daily_risk_spin.get())
+                    }
+
+                    # Сохраняем все настройки в файл
+                    self.settings.save()
+                    self.logger.info("Все настройки успешно сохранены")
 
                 with open(self.config_path, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
 
-                    # Миграция старых настроек
+                    # Миграция старых настроек из формата mt5 в accounts
                     if "mt5" in loaded and loaded["mt5"]:
-                        default["accounts"].append({
+                        if "accounts" not in loaded:
+                            loaded["accounts"] = []
+
+                        loaded["accounts"].append({
                             "login": loaded["mt5"].get("login", ""),
                             "password": loaded["mt5"].get("password", ""),
                             "server": loaded["mt5"].get("server", ""),
                             "path": loaded["mt5"].get("path", "")
                         })
+                        self.logger.debug("Выполнена миграция старых настроек MT5 в новый формат")
+                        del loaded["mt5"]  # Удаляем старый формат после миграции
 
-                    return {**default, **loaded}
+                    return loaded
 
             def save(self):
                 self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -231,6 +313,8 @@ class TradingAssistantApp:
                 if 0 <= index < len(self.accounts):
                     self._settings["current_account_index"] = index
                     self.save()
+
+
 
         # Настройки Telegram
         telegram_frame = ttk.LabelFrame(left_panel, text="Telegram уведомления", padding="10")

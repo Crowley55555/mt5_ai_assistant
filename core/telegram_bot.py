@@ -1,14 +1,25 @@
 import requests
 from typing import Optional
 from utils.logger import TradingLogger
-
-
+import datetime
+from database import MarketDatabase
 class TelegramBot:
-    def __init__(self, token: str, chat_id: str, logger: TradingLogger):
+    def __init__(self, logger: TradingLogger):
+        self.logger = logger
+        self.token = None
+        self.chat_id = None
+        self.enabled = False
+
+    def initialize(self, token: str, chat_id: str) -> bool:
+        """Инициализация с валидацией"""
+        if not token or not chat_id:
+            self.enabled = False
+            return False
+
         self.token = token
         self.chat_id = chat_id
-        self.logger = logger
-        self.base_url = f"https://api.telegram.org/bot{self.token}"
+        self.enabled = True
+        return True
 
     def send_message(self, text: str) -> bool:
         """Отправка сообщения в Telegram"""
@@ -72,7 +83,6 @@ class TelegramBot:
         message = f"<b>⚠️ Ошибка</b>\n<code>{error_message}</code>"
         return self.send_message(message)
 
-    python
 
     def send_daily_report(self, database: MarketDatabase):
         """Отправка ежедневного отчета в Telegram"""
