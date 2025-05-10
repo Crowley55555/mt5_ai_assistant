@@ -205,11 +205,11 @@ class Settings:
         """Получить настройки Ollama"""
         return self._settings.get("ollama", {})
 
-    @ollama.setter
-    def ollama(self, value: Dict):
-        if not isinstance(value, dict):
-            raise ValueError("Ollama настройки должны быть словарем")
-        self._settings["ollama"] = value
+    # @ollama.setter
+    # def ollama(self, value: Dict):
+    #     if not isinstance(value, dict):
+    #         raise ValueError("Ollama настройки должны быть словарем")
+    #     self._settings["ollama"] = value
 
     @property
     def strategies(self) -> Dict:
