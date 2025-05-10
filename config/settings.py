@@ -4,6 +4,26 @@ from typing import Dict, List, Any, Optional
 from utils.logger import TradingLogger
 
 
+def _log_error(self, message: str):
+    """Логирование ошибок"""
+    if self.logger:
+        self.logger.error(message)
+
+def set_logger(self, logger: TradingLogger):
+    """Установка логгера после инициализации"""
+    self._app_logger = logger
+    self.logger = logger.logger
+
+def _log_info(self, message: str):
+    """Логирование информационных сообщений"""
+    if self.logger:
+        self.logger.info(message)
+
+def _log_warning(self, message: str):
+    """Логирование предупреждений"""
+    if self.logger:
+        self.logger.warning(message)
+
 class Settings:
     def __init__(self, config_path: str = "config/config.json", logger: Optional[TradingLogger] = None):
         """
@@ -18,7 +38,7 @@ class Settings:
 
         # Сохраняем объект TradingLogger для последующего использования
         self._app_logger = logger  # Это объект TradingLogger
-        self.logger = logger.logger if logger else None  # Получаем корневой logging.Logger
+        self.logger = logger.logger  # Получаем корневой logging.Logger
 
     def _load_settings(self) -> Dict[str, Any]:
         """Загрузка настроек из файла"""
@@ -31,7 +51,7 @@ class Settings:
                 return self._migrate(loaded)
 
         except Exception as e:
-            self._log_error(f"Ошибка загрузки настроек: {str(e)}")
+            self._logger_error(f"Ошибка загрузки настроек: {str(e)}")
             return self._get_default_settings()
 
     def _create_default_settings(self):
@@ -190,22 +210,5 @@ class Settings:
                        f"по всем сделкам={risk_all_trades}, "
                        f"дневной={daily_risk}")
 
-    def set_logger(self, logger: TradingLogger):
-        """Установка логгера после инициализации"""
-        self._app_logger = logger
-        self.logger = logger.logger
 
-    def _log_info(self, message: str):
-        """Логирование информационных сообщений"""
-        if self.logger:
-            self.logger.info(message)
 
-    def _log_warning(self, message: str):
-        """Логирование предупреждений"""
-        if self.logger:
-            self.logger.warning(message)
-
-    def _log_error(self, message: str):
-        """Логирование ошибок"""
-        if self.logger:
-            self.logger.error(message)

@@ -1,15 +1,16 @@
+from utils.logger import TradingLogger
+# Инициализация корневого логгера
+logger = TradingLogger(log_file="logs/trading_assistant.log")
 import tkinter as tk
 from ui.main_window import TradingAssistantApp
 from core import init_core_components
 from config import Settings
-from utils.logger import TradingLogger
 import pandas as pd
 from pathlib import Path
 import shutil
 from datetime import datetime
 
-# Инициализация корневого логгера
-logger = TradingLogger(log_file="logs/trading_assistant.log")
+
 
 
 def create_db_backup(db_path: str):
