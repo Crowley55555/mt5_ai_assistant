@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from utils.logger import TradingLogger
 
+# logger = TradingLogger(log_file="logs/app.log")
+
 
 def _log_error(self, message: str):
     """Логирование ошибок"""
@@ -51,7 +53,7 @@ class Settings:
                 return self._migrate(loaded)
 
         except Exception as e:
-            self._logger_error(f"Ошибка загрузки настроек: {str(e)}")
+            self.logger.error(f"Ошибка загрузки настроек: {str(e)}")
             return self._get_default_settings()
 
     def _create_default_settings(self):
@@ -63,12 +65,13 @@ class Settings:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(default, f, indent=4, ensure_ascii=False)
 
-            self._log_info("Создан файл настроек с значениями по умолчанию")
+            self.logger.info("Создан файл настроек с значениями по умолчанию")
 
         except Exception as e:
-            self._log_error(f"Ошибка создания файла настроек: {str(e)}")
+            self.logger.error(f"Ошибка создания файла настроек: {str(e)}")
 
-    def _get_default_settings(self) -> Dict[str, Any]:
+    @staticmethod
+    def _get_default_settings() -> Dict[str, Any]:
         """Возвращает стандартные настройки"""
         return {
             "version": 1,
@@ -99,7 +102,7 @@ class Settings:
         latest_version = 1
 
         if current_version < latest_version:
-            self._log_info(f"Выполняется миграция настроек с v{current_version} до v{latest_version}")
+            self.logger.info(f"Выполняется миграция настроек с v{current_version} до v{latest_version}")
             if "mt5" in settings and settings["mt5"]:
                 if "accounts" not in settings:
                     settings["accounts"] = []
@@ -117,10 +120,11 @@ class Settings:
                 del settings["mt5"]
             settings["version"] = latest_version
             self.save(settings)
-            self._log_info("Настройки успешно мигрированы")
+            self.logger.info("Настройки успешно мигрированы")
         return settings
 
-    def _get_current_version(self, settings: Dict[str, Any]) -> int:
+    @staticmethod
+    def _get_current_version(settings: Dict[str, Any]) -> int:
         """Получение текущей версии настроек"""
         return settings.get("version", 0)
 
@@ -130,9 +134,9 @@ class Settings:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(settings or self._settings, f, indent=4, ensure_ascii=False)
-                self._log_info("Настройки сохранены")
+                self.logger.info("Настройки сохранены")
         except Exception as e:
-            self._log_error(f"Ошибка сохранения настроек: {str(e)}")
+            self.logger.error(f"Ошибка сохранения настроек: {str(e)}")
 
     def add_account(self, login: str, password: str, server: str, path: str):
         """Добавление нового аккаунта"""
@@ -145,16 +149,30 @@ class Settings:
         if not any(acc['login'] == login for acc in self.accounts):
             self._settings["accounts"].append(new_account)
             self.save()
-            self._log_info(f"Аккаунт {login} добавлен")
+            self.logger.info(f"Аккаунт {login} добавлен")
 
     def set_current_account(self, index: int):
         """Установка текущего аккаунта по индексу"""
         if 0 <= index < len(self.accounts):
             self._settings["current_account_index"] = index
             self.save()
-            self._log_info(f"Текущий аккаунт изменен на {index}")
+            self.logger.info(f"Текущий аккаунт изменен на {index}")
         else:
-            self._log_warning(f"Неверный индекс аккаунта: {index}")
+            self.logger.warning(f"Неверный индекс аккаунта: {index}")
+
+    def remove_account(self, index: int):
+        """Удаляет аккаунт по индексу"""
+        if 0 <= index < len(self._settings["accounts"]):
+            self._settings["accounts"].pop(index)
+            # Если удалили текущий аккаунт, сбросим индекс
+            if index == self.current_account_index:
+                self.current_account_index = max(0, min(index, len(self._settings["accounts"]) - 1))
+            elif index < self.current_account_index:
+                self.current_account_index -= 1
+            self.save()
+            self.logger.info("Аккаунт удален")
+        else:
+            raise IndexError(f"Индекс аккаунта вне диапазона: {index}")
 
     @property
     def accounts(self) -> List[Dict]:
@@ -174,10 +192,24 @@ class Settings:
         """Получить настройки Telegram"""
         return self._settings.get("telegram", {})
 
+    @telegram.setter
+    def telegram(self, value: Dict):
+        """Установить настройки Telegram"""
+        if not isinstance(value, dict):
+            raise ValueError("Telegram настройки должны быть словарем")
+        self._settings["telegram"] = value
+
+
     @property
     def ollama(self) -> Dict:
         """Получить настройки Ollama"""
         return self._settings.get("ollama", {})
+
+    @ollama.setter
+    def ollama(self, value: Dict):
+        if not isinstance(value, dict):
+            raise ValueError("Ollama настройки должны быть словарем")
+        self._settings["ollama"] = value
 
     @property
     def strategies(self) -> Dict:
@@ -189,13 +221,19 @@ class Settings:
         """Получить настройки риск-менеджмента"""
         return self._settings.get("risk_management", {})
 
+    @risk_management.setter
+    def risk_management(self, value: Dict):
+        if not isinstance(value, dict):
+            raise ValueError("Настройки риск-менеджмента должны быть словарем")
+        self._settings["risk_management"] = value
+
     def update_strategy_settings(self, strategy_name: str, enabled: bool):
         """Обновление настройки стратегии"""
         if "strategies" not in self._settings:
             self._settings["strategies"] = {}
         self._settings["strategies"][strategy_name] = enabled
         self.save()
-        self._log_info(f"Стратегия {strategy_name} {'включена' if enabled else 'выключена'}")
+        self.logger.info(f"Стратегия {strategy_name} {'включена' if enabled else 'выключена'}")
 
     def update_risk_settings(self, risk_per_trade: float, risk_all_trades: float, daily_risk: float):
         """Обновление параметров риск-менеджмента"""
@@ -205,7 +243,7 @@ class Settings:
         self._settings["risk_management"]["risk_all_trades"] = risk_all_trades
         self._settings["risk_management"]["daily_risk"] = daily_risk
         self.save()
-        self._log_info(f"Риск-настройки обновлены: "
+        self.logger.info(f"Риск-настройки обновлены: "
                        f"на сделку={risk_per_trade}, "
                        f"по всем сделкам={risk_all_trades}, "
                        f"дневной={daily_risk}")

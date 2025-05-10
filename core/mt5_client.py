@@ -3,7 +3,7 @@ from typing import Optional, Dict, List
 from datetime import datetime
 import pandas as pd
 from utils.logger import TradingLogger
-from config.constants import TradeAction, OrderType
+from config.constants import TradeAction
 from core.database import MarketDatabase
 from pathlib import Path
 
@@ -85,6 +85,8 @@ class MT5Client:
         except Exception as e:
             self.logger.error(f"Ошибка получения списка символов: {str(e)}")
             return []
+
+
 
     def get_historical_data(self, symbol: str, timeframe: int, count: int) -> Optional[pd.DataFrame]:
         """Получение исторических данных сначала из БД, затем с сервера"""

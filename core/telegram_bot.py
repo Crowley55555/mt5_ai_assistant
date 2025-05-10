@@ -5,16 +5,18 @@ from tkinter import messagebox
 from datetime import datetime
 
 class TelegramBot:
-    def __init__(self, logger: TradingLogger):
+    def __init__(self, logger: TradingLogger, token: str = None, chat_id: str = None):
         """
         Инициализация бота
 
         :param logger: Объект логгера
         """
         self.logger = logger.logger  # Получаем корневой логгер
-        self.token = None
-        self.chat_id = None
+        self.token = token
+        self.chat_id = chat_id
         self.enabled = False
+        self.logger = logger.logger  # Получаем logging.Logger
+        self.bot = None
 
     def initialize(self, token: str, chat_id: str) -> bool:
         """

@@ -26,8 +26,8 @@ class RiskManager:
         """Анализ статистики сделок"""
         stats = {
             'total_trades': 0,
-            'win_rate': 0,
-            'avg_profit': 0,
+            'win_rate': 0.0,
+            'avg_profit': 0.0,
             'symbol': symbol or 'all'
         }
 
