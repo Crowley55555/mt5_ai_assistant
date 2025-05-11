@@ -14,7 +14,7 @@ from core.telegram_bot import TelegramBot
 from core.ollama_integration import OllamaIntegration
 from .database import MarketDatabase
 from config.settings import Settings
-import logging
+
 from utils.logger import TradingLogger
 
 
@@ -29,9 +29,6 @@ __all__ = [
 # Версия ядра
 __version__ = '1.0.0'
 
-# Инициализация логгера
-logger = logging.getLogger(__name__)
-logger.addHandler(logging.NullHandler())
 
 
 class CoreComponents:
@@ -45,7 +42,7 @@ class CoreComponents:
         self.strategies = {}     # Торговые стратегии
 
 
-def init_core_components(settings: Settings, logger: logging.Logger) -> CoreComponents:
+def init_core_components(settings: Settings, logger: TradingLogger) -> CoreComponents:
     """
     Инициализация всех компонентов ядра
 

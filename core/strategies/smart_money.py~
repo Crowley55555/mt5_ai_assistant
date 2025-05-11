@@ -3,46 +3,24 @@ import numpy as np
 from typing import Optional, Dict
 from .base import BaseStrategy
 from config.constants import TradeAction
-from utils.logger import TradingLogger
+import logging
 
 class SmartMoneyStrategy(BaseStrategy):
-    def __init__(self, name: str, mt5_client, logger: TradingLogger, database=None,
-                 sma_period: int = 50,
-                 ema_period: int = 20,
-                 rsi_period: int = 14,
-                 stoch_k_period: int = 14,
-                 stoch_d_period: int = 3,
-                 atr_period: int = 14,
-                 adx_period: int = 14,
-                 macd_fast: int = 12,
-                 macd_slow: int = 26,
-                 macd_signal: int = 9,
-                 volume_ma_period: int = 20,
-                 pinbar_threshold: float = 2.0,
-                 engulfing_ratio: float = 1.5):
-        super().__init__(
-            name=name,
-            mt5_client=mt5_client,
-            logger=logger,
-            database=database,
-            sma_fast_period=sma_period,
-            sma_slow_period=ema_period,
-            rsi_period=rsi_period,
-            stoch_k_period=stoch_k_period,
-            stoch_d_period=stoch_d_period,
-            atr_period=atr_period,
-            adx_period=adx_period,
-            macd_fast=macd_fast,
-            macd_slow=macd_slow,
-            macd_signal=macd_signal,
-            stoch_slowing=3
-        )
-        self.sma_period = sma_period
-        self.ema_period = ema_period
-        self.volume_ma_period = volume_ma_period
-        self.pinbar_threshold = pinbar_threshold
-        self.engulfing_ratio = engulfing_ratio
-        self.logger.debug("Инициализирована стратегия Smart Money")
+    def __init__(self, name: str, mt5_client, logger: logging.Logger, database=None):
+        """
+        Инициализация стратегии "Смарт Мани"
+
+        :param name: Название стратегии
+        :param mt5_client: Клиент для работы с MT5
+        :param logger: Объект логгера
+        :param database: База данных (опционально)
+        """
+        super().__init__(name, mt5_client, logger, database)
+
+        # Проверка параметров
+        if not all([self.sma_period > 0, self.ema_period > 0, self.rsi_period > 0,
+                    self.atr_period > 0, self.volume_ma_period > 0]):
+            raise ValueError("Все периоды индикаторов должны быть положительными")
 
     def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """Расчет индикаторов для стратегии Смарт Мани"""

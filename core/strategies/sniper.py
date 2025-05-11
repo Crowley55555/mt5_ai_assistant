@@ -3,34 +3,48 @@ import numpy as np
 from typing import Optional, Dict
 from .base import BaseStrategy
 from config.constants import TradeAction
-import logging
+from utils.logger import TradingLogger
+
 
 class SniperStrategy(BaseStrategy):
-    def __init__(self, name: str, mt5_client, logger: logging.Logger, database=None):
+    def __init__(self, name: str, mt5_client, logger: TradingLogger, database=None,
+                 sma_fast_period: int = 10,
+                 sma_slow_period: int = 20,
+                 rsi_period: int = 14,
+                 stoch_k_period: int = 14,
+                 stoch_d_period: int = 3,
+                 atr_period: int = 14,
+                 adx_period: int = 14,
+                 macd_fast: int = 12,
+                 macd_slow: int = 26,
+                 macd_signal: int = 9,
+                 stoch_slowing: int = 3):
         """
         Инициализация стратегии "Снайпер"
 
         :param name: Название стратегии
         :param mt5_client: Клиент для работы с MT5
-        :param logger: Объект логгера
+        :param logger: Логгер
         :param database: База данных (опционально)
         """
-        super().__init__(name, mt5_client, logger, database)
-
-        # Проверка параметров
-        if not all([
-            self.sma_fast_period > 0,
-            self.sma_slow_period > 0,
-            self.rsi_period > 0,
-            self.stoch_k_period > 0,
-            self.stoch_d_period > 0,
-            self.atr_period > 0,
-            self.adx_period > 0,
-            self.macd_fast > 0,
-            self.macd_slow > 0,
-            self.macd_signal > 0
-        ]):
-            raise ValueError("Все периоды индикаторов должны быть положительными числами")
+        super().__init__(
+            name=name,
+            mt5_client=mt5_client,
+            logger=logger,
+            database=database,
+            sma_fast_period=sma_fast_period,
+            sma_slow_period=sma_slow_period,
+            rsi_period=rsi_period,
+            stoch_k_period=stoch_k_period,
+            stoch_d_period=stoch_d_period,
+            atr_period=atr_period,
+            adx_period=adx_period,
+            macd_fast=macd_fast,
+            macd_slow=macd_slow,
+            macd_signal=macd_signal,
+            stoch_slowing=stoch_slowing
+        )
+        self.logger.debug("Инициализирована стратегия Снайпер")
 
     def calculate_indicators(self, data: pd.DataFrame) -> pd.DataFrame:
         """Расчет всех индикаторов для стратегии Снайпер"""
@@ -86,7 +100,7 @@ class SniperStrategy(BaseStrategy):
             return data
 
     def analyze(self, symbol: str, timeframe: int, data: pd.DataFrame) -> Optional[Dict]:
-        """Анализ рыночной ситуации и генерация торговых сигналов"""
+        """Анализ по стратегии и генерация сигналов"""
         if not self.enabled:
             self.logger.debug(f"Стратегия {self.name} отключена")
             return None
@@ -99,36 +113,33 @@ class SniperStrategy(BaseStrategy):
             last = data.iloc[-1]
             prev = data.iloc[-2]
 
-            # Определение тренда
             trend_up = (last['sma_fast'] > last['sma_slow']) and (last['close'] > last['sma_slow'])
             trend_down = (last['sma_fast'] < last['sma_slow']) and (last['close'] < last['sma_slow'])
 
-            # Проверка силы тренда
             strong_trend = last['adx'] > 25
+            high_volume = last['real_volume'] > last['volume_ma']
 
-            # Анализ на покупку
+            # Условия покупки
             buy_signal = (
                     trend_up and
                     strong_trend and
-                    last['rsi'] > 50 and last['rsi'] < 70 and
+                    high_volume and
                     last['stoch_k'] > last['stoch_d'] and prev['stoch_k'] < prev['stoch_d'] and
                     last['macd_hist'] > 0 and last['macd_hist'] > prev['macd_hist']
             )
 
-            # Анализ на продажу
+            # Условия продажи
             sell_signal = (
                     trend_down and
                     strong_trend and
-                    last['rsi'] < 50 and last['rsi'] > 30 and
+                    high_volume and
                     last['stoch_k'] < last['stoch_d'] and prev['stoch_k'] > prev['stoch_d'] and
                     last['macd_hist'] < 0 and last['macd_hist'] < prev['macd_hist']
             )
 
-            # Формирование сигналов
             if buy_signal:
                 stop_loss = last['low'] - 2 * last['atr']
                 take_profit = last['close'] + 3 * last['atr']
-
                 self.logger.info(f"Обнаружен сигнал на покупку по {symbol}")
                 return {
                     'action': TradeAction.BUY,
@@ -137,13 +148,12 @@ class SniperStrategy(BaseStrategy):
                     'price': last['close'],
                     'stop_loss': stop_loss,
                     'take_profit': take_profit,
-                    'comment': f"Стратегия: {self.name}, Таймфрейм: {timeframe}"
+                    'comment': f"Стратегия: {self.name}"
                 }
 
             if sell_signal:
                 stop_loss = last['high'] + 2 * last['atr']
                 take_profit = last['close'] - 3 * last['atr']
-
                 self.logger.info(f"Обнаружен сигнал на продажу по {symbol}")
                 return {
                     'action': TradeAction.SELL,
@@ -152,7 +162,7 @@ class SniperStrategy(BaseStrategy):
                     'price': last['close'],
                     'stop_loss': stop_loss,
                     'take_profit': take_profit,
-                    'comment': f"Стратегия: {self.name}, Таймфрейм: {timeframe}"
+                    'comment': f"Стратегия: {self.name}"
                 }
 
             self.logger.debug(f"Нет сигнала по {symbol}_{timeframe}")
