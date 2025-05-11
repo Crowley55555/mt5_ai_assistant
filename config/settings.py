@@ -1,254 +1,226 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from utils.logger import TradingLogger
+from dataclasses import dataclass, asdict
+from typing import Literal
 
-# logger = TradingLogger(log_file="logs/app.log")
+
+# Модели данных для типизации настроек
+@dataclass
+class AccountConfig:
+    login: str
+    password: str
+    server: str
+    path: str
 
 
-def _log_error(self, message: str):
-    """Логирование ошибок"""
-    if self.logger:
-        self.logger.error(message)
+@dataclass
+class TelegramConfig:
+    token: str
+    chat_id: str
 
-def set_logger(self, logger: TradingLogger):
-    """Установка логгера после инициализации"""
-    self._app_logger = logger
-    self.logger = logger.logger
 
-def _log_info(self, message: str):
-    """Логирование информационных сообщений"""
-    if self.logger:
-        self.logger.info(message)
+@dataclass
+class OllamaConfig:
+    base_url: str
+    model: str
 
-def _log_warning(self, message: str):
-    """Логирование предупреждений"""
-    if self.logger:
-        self.logger.warning(message)
+
+@dataclass
+class RiskManagementConfig:
+    risk_per_trade: float = 1.0
+    risk_all_trades: float = 5.0
+    daily_risk: float = 10.0
+
+
+StrategyName = Literal["Снайпер", "Смарт Снайпер", "Смарт Мани"]
+
 
 class Settings:
-    def __init__(self, config_path: str = "config/config.json"):
+    """Класс для управления настройками приложения"""
+
+    _CONFIG_VERSION: int = 1
+    _DEFAULT_CONFIG: Dict[str, Any] = {
+        "version": _CONFIG_VERSION,
+        "accounts": [],
+        "telegram": {"token": "", "chat_id": ""},
+        "ollama": {"base_url": "", "model": ""},
+        "risk_management": asdict(RiskManagementConfig()),
+        "strategies": {"Снайпер": True, "Смарт Снайпер": False, "Смарт Мани": False}
+    }
+
+    def __init__(self, config_path: str = "config/config.json", logger: Optional[TradingLogger] = None):
         """
         Инициализация менеджера настроек
 
-        :param config_path: Путь к файлу настроек
+        Args:
+            config_path: Путь к файлу конфигурации
+            logger: Экземпляр логгера
         """
         self.config_path = Path(config_path)
+        self.logger = logger
         self._settings = self._load_settings()
-        self.current_account_index = self._settings.get("current_account_index", 0)
-
-        # Сохраняем объект TradingLogger для последующего использования
-
-        self.logger = None  # Получаем корневой logging.Logger
+        self._validate_settings()
 
     def _load_settings(self) -> Dict[str, Any]:
-        """Загрузка настроек из файла"""
+        """Загрузка настроек из файла с обработкой ошибок"""
         try:
             if not self.config_path.exists():
-                self._create_default_settings()
+                return self._create_default_config()
 
             with open(self.config_path, 'r', encoding='utf-8') as f:
-                loaded = json.load(f)
-                return self._migrate(loaded)
+                loaded_settings = json.load(f)
+                return self._migrate_settings(loaded_settings)
 
         except Exception as e:
-            self.logger.error(f"Ошибка загрузки настроек: {str(e)}")
-            return self._get_default_settings()
+            self._log_error(f"Ошибка загрузки настроек: {str(e)}")
+            return self._get_default_config()
 
-    def _create_default_settings(self):
-        """Создание папок и дефолтных настроек"""
+    def _create_default_config(self) -> Dict[str, Any]:
+        """Создание конфига по умолчанию"""
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-
-            default = self._get_default_settings()
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                json.dump(default, f, indent=4, ensure_ascii=False)
-
-            self.logger.info("Создан файл настроек с значениями по умолчанию")
-
+            default_config = self._get_default_config()
+            self._save_settings(default_config)
+            self._log_info("Создан файл настроек по умолчанию")
+            return default_config
         except Exception as e:
-            self.logger.error(f"Ошибка создания файла настроек: {str(e)}")
+            self._log_error(f"Ошибка создания конфига: {str(e)}")
+            return self._get_default_config()
 
-    @staticmethod
-    def _get_default_settings() -> Dict[str, Any]:
-        """Возвращает стандартные настройки"""
-        return {
-            "version": 1,
-            "accounts": [],
-            "telegram": {
-                "token": "",
-                "chat_id": ""
-            },
-            "ollama": {
-                "base_url": "",
-                "model": ""
-            },
-            "risk_management": {
-                "risk_per_trade": 1.0,
-                "risk_all_trades": 5.0,
-                "daily_risk": 10.0
-            },
-            "strategies": {
-                "Снайпер": True,
-                "Смарт Снайпер": False,
-                "Смарт Мани": False
-            }
-        }
+    def _migrate_settings(self, settings: Dict[str, Any]) -> Dict[str, Any]:
+        """Миграция старых версий настроек"""
+        current_version = settings.get("version", 0)
 
-    def _migrate(self, settings: Dict[str, Any]) -> Dict[str, Any]:
-        """Миграция старых настроек"""
-        current_version = self._get_current_version(settings)
-        latest_version = 1
+        if current_version < self._CONFIG_VERSION:
+            self._log_info(f"Миграция настроек с v{current_version} до v{self._CONFIG_VERSION}")
 
-        if current_version < latest_version:
-            self.logger.info(f"Выполняется миграция настроек с v{current_version} до v{latest_version}")
-            if "mt5" in settings and settings["mt5"]:
-                if "accounts" not in settings:
-                    settings["accounts"] = []
-                exists = any(
-                    acc.get('login') == settings['mt5'].get('login')
-                    for acc in settings['accounts']
-                )
-                if not exists:
-                    settings["accounts"].append({
-                        "login": settings["mt5"].get("login", ""),
-                        "password": settings["mt5"].get("password", ""),
-                        "server": settings["mt5"].get("server", ""),
-                        "path": settings["mt5"].get("path", "")
-                    })
-                del settings["mt5"]
-            settings["version"] = latest_version
-            self.save(settings)
-            self.logger.info("Настройки успешно мигрированы")
+            # Миграция с версии 0 на 1
+            if current_version == 0:
+                if "mt5" in settings:
+                    settings.setdefault("accounts", [])
+                    if not any(acc.get('login') == settings['mt5'].get('login') for acc in settings['accounts']):
+                        settings["accounts"].append({
+                            "login": settings["mt5"].get("login", ""),
+                            "password": settings["mt5"].get("password", ""),
+                            "server": settings["mt5"].get("server", ""),
+                            "path": settings["mt5"].get("path", "")
+                        })
+                    del settings["mt5"]
+
+            settings["version"] = self._CONFIG_VERSION
+            self._save_settings(settings)
+
         return settings
 
-    @staticmethod
-    def _get_current_version(settings: Dict[str, Any]) -> int:
-        """Получение текущей версии настроек"""
-        return settings.get("version", 0)
+    def _validate_settings(self) -> None:
+        """Валидация загруженных настроек"""
+        if not isinstance(self._settings.get("accounts"), list):
+            self._settings["accounts"] = []
+            self._log_warning("Некорректный формат аккаунтов, сброс к default")
 
-    def save(self, settings: Dict[str, Any] = None):
-        """Сохранение настроек в файл"""
+    def save(self) -> None:
+        """Сохранение текущих настроек в файл"""
+        self._save_settings(self._settings)
+
+    def _save_settings(self, settings: Dict[str, Any]) -> None:
+        """Внутренний метод сохранения настроек"""
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.config_path, 'w', encoding='utf-8') as f:
-                json.dump(settings or self._settings, f, indent=4, ensure_ascii=False)
-                self.logger.info("Настройки сохранены")
+                json.dump(settings, f, indent=4, ensure_ascii=False)
+            self._log_info("Настройки сохранены")
         except Exception as e:
-            self.logger.error(f"Ошибка сохранения настроек: {str(e)}")
+            self._log_error(f"Ошибка сохранения настроек: {str(e)}")
 
-    def add_account(self, login: str, password: str, server: str, path: str):
+    # Методы для работы с аккаунтами
+    def add_account(self, account: AccountConfig) -> None:
         """Добавление нового аккаунта"""
-        new_account = {
-            "login": login,
-            "password": password,
-            "server": server,
-            "path": path
-        }
-        if not any(acc['login'] == login for acc in self.accounts):
-            self._settings["accounts"].append(new_account)
+        account_dict = asdict(account)
+        if not any(acc['login'] == account.login for acc in self.accounts):
+            self._settings["accounts"].append(account_dict)
             self.save()
-            self.logger.info(f"Аккаунт {login} добавлен")
+            self._log_info(f"Добавлен аккаунт: {account.login}")
 
-    def set_current_account(self, index: int):
-        """Установка текущего аккаунта по индексу"""
-        if 0 <= index < len(self.accounts):
-            self._settings["current_account_index"] = index
+    def remove_account(self, login: str) -> bool:
+        """Удаление аккаунта по логину"""
+        initial_count = len(self._settings["accounts"])
+        self._settings["accounts"] = [acc for acc in self._settings["accounts"] if acc["login"] != login]
+
+        if len(self._settings["accounts"]) < initial_count:
             self.save()
-            self.logger.info(f"Текущий аккаунт изменен на {index}")
-        else:
-            self.logger.warning(f"Неверный индекс аккаунта: {index}")
+            self._log_info(f"Удален аккаунт: {login}")
+            return True
+        return False
 
-    def remove_account(self, index: int):
-        """Удаляет аккаунт по индексу"""
-        if 0 <= index < len(self._settings["accounts"]):
-            self._settings["accounts"].pop(index)
-            # Если удалили текущий аккаунт, сбросим индекс
-            if index == self.current_account_index:
-                self.current_account_index = max(0, min(index, len(self._settings["accounts"]) - 1))
-            elif index < self.current_account_index:
-                self.current_account_index -= 1
-            self.save()
-            self.logger.info("Аккаунт удален")
-        else:
-            raise IndexError(f"Индекс аккаунта вне диапазона: {index}")
+    def get_account(self, login: str) -> Optional[AccountConfig]:
+        """Получение конфига аккаунта по логину"""
+        for acc in self._settings["accounts"]:
+            if acc["login"] == login:
+                return AccountConfig(**acc)
+        return None
 
+    # Property для доступа к настройкам
     @property
-    def accounts(self) -> List[Dict]:
-        """Получить список аккаунтов"""
+    def accounts(self) -> List[Dict[str, str]]:
+        """Список всех аккаунтов"""
         return self._settings.get("accounts", [])
 
     @property
-    def current_account(self) -> Dict:
-        """Получить текущий аккаунт"""
-        idx = self._settings.get("current_account_index", 0)
-        if 0 <= idx < len(self.accounts):
-            return self.accounts[idx]
-        return {}
+    def telegram_config(self) -> TelegramConfig:
+        """Конфигурация Telegram"""
+        return TelegramConfig(**self._settings.get("telegram", {}))
 
-    @property
-    def telegram(self) -> Dict:
-        """Получить настройки Telegram"""
-        return self._settings.get("telegram", {})
-
-    @telegram.setter
-    def telegram(self, value: Dict):
-        """Установить настройки Telegram"""
-        if not isinstance(value, dict):
-            raise ValueError("Telegram настройки должны быть словарем")
-        self._settings["telegram"] = value
-
-
-    @property
-    def ollama(self) -> Dict:
-        """Получить настройки Ollama"""
-        return self._settings.get("ollama", {})
-
-    @ollama.setter
-    def ollama(self, value: Dict):
-        if not isinstance(value, dict):
-            raise ValueError("Ollama настройки должны быть словарем")
-        self._settings["ollama"] = value
-
-    @property
-    def strategies(self) -> Dict:
-        """Получить настройки стратегий"""
-        return self._settings.get("strategies", {})
-
-    @property
-    def risk_management(self) -> Dict:
-        """Получить настройки риск-менеджмента"""
-        return self._settings.get("risk_management", {})
-
-    @risk_management.setter
-    def risk_management(self, value: Dict):
-        if not isinstance(value, dict):
-            raise ValueError("Настройки риск-менеджмента должны быть словарем")
-        self._settings["risk_management"] = value
-
-    def update_strategy_settings(self, strategy_name: str, enabled: bool):
-        """Обновление настройки стратегии"""
-        if "strategies" not in self._settings:
-            self._settings["strategies"] = {}
-        self._settings["strategies"][strategy_name] = enabled
+    @telegram_config.setter
+    def telegram_config(self, config: TelegramConfig) -> None:
+        self._settings["telegram"] = asdict(config)
         self.save()
-        self.logger.info(f"Стратегия {strategy_name} {'включена' if enabled else 'выключена'}")
-
-    def update_risk_settings(self, risk_per_trade: float, risk_all_trades: float, daily_risk: float):
-        """Обновление параметров риск-менеджмента"""
-        if "risk_management" not in self._settings:
-            self._settings["risk_management"] = {}
-        self._settings["risk_management"]["risk_per_trade"] = risk_per_trade
-        self._settings["risk_management"]["risk_all_trades"] = risk_all_trades
-        self._settings["risk_management"]["daily_risk"] = daily_risk
-        self.save()
-        self.logger.info(f"Риск-настройки обновлены: "
-                       f"на сделку={risk_per_trade}, "
-                       f"по всем сделкам={risk_all_trades}, "
-                       f"дневной={daily_risk}")
 
     @property
-    def database_config(self) -> Dict:
-        """Возвращает настройки базы данных"""
-        return self._settings.get("database", {})
+    def ollama_config(self) -> OllamaConfig:
+        """Конфигурация Ollama"""
+        return OllamaConfig(**self._settings.get("ollama", {}))
 
+    @ollama_config.setter
+    def ollama_config(self, config: OllamaConfig) -> None:
+        self._settings["ollama"] = asdict(config)
+        self.save()
+
+    @property
+    def risk_config(self) -> RiskManagementConfig:
+        """Конфигурация риск-менеджмента"""
+        return RiskManagementConfig(**self._settings.get("risk_management", {}))
+
+    @risk_config.setter
+    def risk_config(self, config: RiskManagementConfig) -> None:
+        self._settings["risk_management"] = asdict(config)
+        self.save()
+
+    def is_strategy_enabled(self, name: StrategyName) -> bool:
+        """Проверка активности стратегии"""
+        return self._settings.get("strategies", {}).get(name, False)
+
+    def set_strategy_state(self, name: StrategyName, enabled: bool) -> None:
+        """Установка состояния стратегии"""
+        self._settings.setdefault("strategies", {})[name] = enabled
+        self.save()
+        self._log_info(f"Стратегия {name} {'активирована' if enabled else 'деактивирована'}")
+
+    # Методы логирования
+    def _log_error(self, message: str) -> None:
+        if self.logger:
+            self.logger.error(message)
+
+    def _log_info(self, message: str) -> None:
+        if self.logger:
+            self.logger.info(message)
+
+    def _log_warning(self, message: str) -> None:
+        if self.logger:
+            self.logger.warning(message)
+
+    @staticmethod
+    def _get_default_config() -> Dict[str, Any]:
+        """Возвращает дефолтную конфигурацию"""
+        return Settings._DEFAULT_CONFIG.copy()
