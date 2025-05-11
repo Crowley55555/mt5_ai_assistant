@@ -1,12 +1,12 @@
 from typing import Dict
 from datetime import datetime
 import MetaTrader5 as mt5
-import logging
+from utils.logger import TradingLogger
 from core.mt5_client import MT5Client
 from typing import Optional
 
 class RiskManager:
-    def __init__(self, mt5_client: MT5Client, logger: logging.Logger):
+    def __init__(self, mt5_client: MT5Client, logger: TradingLogger):
         """
         Инициализация менеджера рисков
 

@@ -3,10 +3,10 @@ import numpy as np
 from typing import Optional, Dict
 from .base import BaseStrategy
 from config.constants import TradeAction
-import logging
+from utils.logger import TradingLogger
 
 class SmartSniperStrategy(BaseStrategy):
-    def __init__(self, name: str, mt5_client, logger: logging.Logger, database=None):
+    def __init__(self, name: str, mt5_client, logger: TradingLogger, database=None):
         """
         Инициализация стратегии "Смарт Снайпер"
 
@@ -179,7 +179,7 @@ class SmartSniperStrategy(BaseStrategy):
     def get_required_history_size(self) -> int:
         """Возвращает необходимое количество баров для анализа"""
         return max(
-            self.vwap_period * 2,
+            # self.vwap_period * 2,
             self.sma_slow_period,
             self.rsi_period,
             self.stoch_k_period + self.stoch_d_period + self.stoch_slowing,

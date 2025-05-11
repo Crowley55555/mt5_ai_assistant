@@ -1,5 +1,6 @@
 from typing import Union
 from config.constants import Timeframes
+from typing import Dict, List
 
 
 def format_price(price: float, symbol: str) -> str:
@@ -97,3 +98,20 @@ def timeframe_to_str(timeframe: Union[int, Timeframes]) -> str:
 
     except Exception as e:
         raise ValueError(f"Ошибка преобразования таймфрейма {timeframe}: {str(e)}")
+
+def format_dict(self, data: Dict) -> str:
+    """Форматирование словаря в читаемую строку для промпта"""
+    def format_recursive(d: Dict, indent: int = 0) -> List[str]:
+        lines = []
+        for key, value in d.items():
+            if isinstance(value, dict):
+                lines.append(f"{' ' * indent}{key}:")
+                lines.extend(format_recursive(value, indent + 2))
+            elif isinstance(value, (list, tuple)) and len(value) > 0 and isinstance(value[0], (int, float)):
+                lines.append(f"{' ' * indent}{key}: {', '.join(map(str, value[-5:]))}")
+            else:
+                lines.append(f"{' ' * indent}{key}: {value}")
+        return lines
+
+    formatted_lines = format_recursive(data)
+    return "\n".join(formatted_lines)

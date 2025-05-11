@@ -235,8 +235,9 @@ class TradingAssistantApp:
             messagebox.showerror("Ошибка", "Заполните все поля подключения к MT5")
             return
 
-        if not login.isdigit():
-            self.logger.error("Логин должен быть числом")
+        try:
+            login_int = int(login)  # Явно конвертируем в int
+        except ValueError:
             messagebox.showerror("Ошибка", "Логин должен быть числом")
             return
 

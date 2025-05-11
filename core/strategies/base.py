@@ -1,6 +1,6 @@
+import pandas as pd
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, List
-import pandas as pd
 from utils.logger import TradingLogger
 from config.constants import TradeAction, Timeframes
 from core.mt5_client import MT5Client
@@ -71,6 +71,7 @@ class BaseStrategy(ABC):
         self.pinbar_threshold = pinbar_threshold
         self.engulfing_ratio = engulfing_ratio
         self.volume_ma_period = volume_ma_period
+
 
         # Списки символов и таймфреймов
         self.symbols = []  # type: List[str]

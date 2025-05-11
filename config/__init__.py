@@ -23,10 +23,6 @@ __all__ = [
     'StrategyNames'
 ]
 
-# Инициализация логгера (будет переопределена в основном приложении)
-import logging
-logging.getLogger(__name__).addHandler(logging.NullHandler())
-
 def get_version():
     """Возвращает версию конфигурационного модуля"""
     return '1.1.0'

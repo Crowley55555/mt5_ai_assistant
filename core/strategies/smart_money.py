@@ -105,6 +105,7 @@ class SmartMoneyStrategy(BaseStrategy):
 
     def analyze(self, symbol: str, timeframe: int, data: pd.DataFrame) -> Optional[Dict]:
         """Анализ рыночной ситуации с учетом свечных паттернов и объемов"""
+
         if not self.enabled:
             self.logger.debug(f"Стратегия {self.name} отключена")
             return None
@@ -123,8 +124,8 @@ class SmartMoneyStrategy(BaseStrategy):
             resistance = data['high'].rolling(20).max().iloc[-1]
 
             # Определение тренда
-            trend_up = last['close'] > last['ema'] and last['ema'] > last['sma']
-            trend_down = last['close'] < last['ema'] and last['ema'] < last['sma']
+            trend_up = last['close'] > last['ema'] > last['sma']
+            trend_down = last['close'] < last['ema'] < last['sma']
 
             # Анализ объема
             high_volume = last['volume_ratio'] > 1.5
@@ -197,7 +198,8 @@ class SmartMoneyStrategy(BaseStrategy):
             self.logger.error(f"Ошибка анализа рынка по {symbol}: {str(e)}")
             return None
 
-    def _get_pattern_name(self, candle) -> str:
+    @staticmethod
+    def _get_pattern_name(candle: Dict) -> str:
         """Определение названия свечного паттерна"""
         if candle['is_pinbar']:
             return "Бычий пин-бар" if candle['lower_shadow'] > candle['upper_shadow'] else "Медвежий пин-бар"

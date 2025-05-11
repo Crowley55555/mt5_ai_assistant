@@ -146,7 +146,7 @@ class MT5Client:
                 self.logger.error(f"Не найден символ {symbol} в MT5")
                 return None
 
-            point = symbol_info.point
+            # point = symbol_info.point
             price = mt5.symbol_info_tick(symbol).ask if action == TradeAction.BUY else mt5.symbol_info_tick(symbol).bid
 
             request = {

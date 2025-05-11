@@ -39,14 +39,6 @@ __all__ = [
 # Версия модуля утилит
 __version__ = '1.1.0'
 
-# Инициализация корневого логгера
-import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
 
 class _UtilsInitializer:
     """Приватный класс для инициализации утилит"""

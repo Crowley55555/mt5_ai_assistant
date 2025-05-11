@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from utils.logger import TradingLogger
 
 # logger = TradingLogger(log_file="logs/app.log")
@@ -27,20 +27,19 @@ def _log_warning(self, message: str):
         self.logger.warning(message)
 
 class Settings:
-    def __init__(self, config_path: str = "config/config.json", logger: Optional[TradingLogger] = None):
+    def __init__(self, config_path: str = "config/config.json"):
         """
         Инициализация менеджера настроек
 
         :param config_path: Путь к файлу настроек
-        :param logger: Объект логгера (опционально)
         """
         self.config_path = Path(config_path)
         self._settings = self._load_settings()
         self.current_account_index = self._settings.get("current_account_index", 0)
 
         # Сохраняем объект TradingLogger для последующего использования
-        self._app_logger = logger  # Это объект TradingLogger
-        self.logger = logger.logger  # Получаем корневой logging.Logger
+
+        self.logger = None  # Получаем корневой logging.Logger
 
     def _load_settings(self) -> Dict[str, Any]:
         """Загрузка настроек из файла"""
@@ -248,5 +247,8 @@ class Settings:
                        f"по всем сделкам={risk_all_trades}, "
                        f"дневной={daily_risk}")
 
-
+    @property
+    def database_config(self) -> Dict:
+        """Возвращает настройки базы данных"""
+        return self._settings.get("database", {})
 

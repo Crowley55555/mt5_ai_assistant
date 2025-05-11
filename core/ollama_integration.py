@@ -1,8 +1,11 @@
 import requests
-from typing import Dict, List
+from typing import Dict, List, Any
 from utils.logger import TradingLogger
 from datetime import datetime
 from pathlib import Path
+from PyPDF2 import PdfReader
+import re
+from utils.helpers import format_dict
 
 class OllamaIntegration:
     def __init__(self, base_url: str, model: str, logger: TradingLogger):
@@ -11,50 +14,54 @@ class OllamaIntegration:
 
         :param base_url: Базовый URL Ollama API (например, http://localhost:11434)
         :param model: Название модели (например, 'llama2')
-        :param logger: Объект логгера
+        :param logger: Логгер приложения
         """
         self.base_url = base_url.rstrip('/')
         self.model = model
-        self.logger = logger.logger  # Получаем корневой логгер
-        self.knowledge_base = []
+        self.logger = logger  # <-- Теперь используем TradingLogger напрямую
+        self.knowledge_base = []  # <-- хранение базы знаний
 
     def load_knowledge(self, file_path: str) -> bool:
-        """Загрузка базы знаний из файла"""
+        """Загрузка содержимого файла в базу знаний"""
         try:
             path = Path(file_path)
             if not path.exists():
                 self.logger.error(f"Файл {file_path} не найден")
                 return False
 
-            # Загрузка содержимого файла
-            if path.suffix.lower() == '.pdf':
+            # Загрузка из PDF
+            if path.suffix.lower() == ".pdf":
                 try:
-                    from PyPDF2 import PdfReader
-                    with open(path, 'rb') as f:
+                    with open(path, "rb") as f:
                         reader = PdfReader(f)
                         text = "\n".join([page.extract_text() for page in reader.pages])
                         self.knowledge_base.append({
-                            'source': path.name,
-                            'content': text
+                            "source": path.name,
+                            "content": text
                         })
-                except ImportError as e:
-                    self.logger.warning("Для чтения PDF требуется установка PyPDF2")
+                    self.logger.info(f"База знаний загружена из {path.name}")
+                    return True
+                except ImportError:
+                    self.logger.warning("Для чтения PDF требуется установить PyPDF2")
                     return False
-            else:
-                with open(path, 'r', encoding='utf-8') as f:
-                    self.knowledge_base.append({
-                        'source': path.name,
-                        'content': f.read()
-                    })
 
-            self.logger.info(f"Загружена база знаний из {path.name}")
+            # Загрузка из текстовых файлов
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+                self.knowledge_base.append({
+                    "source": path.name,
+                    "content": content
+                })
+
+            self.logger.info(f"База знаний загружена из {path.name}")
             return True
 
         except Exception as e:
             self.logger.error(f"Ошибка загрузки базы знаний: {str(e)}")
             return False
 
-    def analyze_market(self, prompt: str) -> Dict[str, any]:
+    def analyze_market(self, prompt: str) -> Dict[str, Any]:
+
         """
         Анализ рыночной ситуации с помощью Ollama
 
@@ -62,7 +69,6 @@ class OllamaIntegration:
         :return: Словарь с результатами анализа
         """
         url = f"{self.base_url}/api/generate"
-
         payload = {
             "model": self.model,
             "prompt": prompt,
@@ -77,20 +83,16 @@ class OllamaIntegration:
 
         try:
             response = requests.post(url, json=payload, timeout=60)
-
             if response.status_code == 200:
                 result = response.json()
                 self.logger.debug("Ответ от Ollama успешно получен")
-                return self._parse_response(result.get('response', ''))
-
+                return self._parse_response(result.get("response", ""))
             elif response.status_code == 503:
                 self.logger.warning("Ollama: сервис недоступен")
                 return {"error": "Сервер Ollama недоступен"}
-
             elif response.status_code == 400:
                 self.logger.warning("Ollama: невалидный запрос")
                 return {"error": "Невалидный промпт или параметры запроса"}
-
             else:
                 error_msg = f"Ollama: код {response.status_code}, ответ: {response.text[:100]}..."
                 self.logger.error(error_msg)
@@ -102,170 +104,129 @@ class OllamaIntegration:
 
     def _prepare_prompt(self, symbol: str, data: Dict) -> str:
         """
-        Подготовка промта для анализа
+        Формирует промпт для анализа на основе данных и базы знаний
 
-        :param symbol: Символ для анализа
-        :param data: Данные для анализа
-        :return: Сформированный промпт
+        :param symbol: Торговая пара (например, EURUSD)
+        :param data: Данные о рынке
+        :return: Готовый промпт
         """
-        # Определяем релевантную информацию из базы знаний
         relevant_info = self._get_relevant_knowledge(symbol)
 
-        # Формируем промпт
         prompt = (
-            f"Ты - профессиональный финансовый аналитик. Проанализируй текущую рыночную ситуацию для {symbol}.\n"
-            f"Данные для анализа:\n{self._format_dict(data)}\n\n"
-            f"Учитывай следующую информацию из базы знаний:\n"
-            f"{relevant_info}\n\n"
-            f"Дай рекомендацию: покупать, продавать или ждать. "
-            f"Обоснуй свой ответ и укажи ключевые уровни поддержки и сопротивления."
+            f"Вы — профессиональный финансовый аналитик. Проанализируйте текущую ситуацию по {symbol}.\n\n"
+            f"Данные:\n{format_dict(data)}\n\n"
+            f"Релевантная информация из базы знаний:\n{relevant_info}\n\n"
+            "Рекомендация: покупать, продавать или ждать?\n"
+            "Обоснуйте рекомендацию и укажите ключевые уровни поддержки и сопротивления."
         )
-        self.logger.debug(f"Сформирован промпт для {symbol} (длина: {len(prompt)})")
+
+        self.logger.debug(f"Промпт для {symbol} создан ({len(prompt)} символов)")
         return prompt
 
     def _get_relevant_knowledge(self, symbol: str) -> str:
         """
-        Получение релевантной информации из базы знаний
+        Поиск информации в базе знаний по символу
 
-        :param symbol: Символ для поиска в базе знаний
-        :return: Актуальная информация из базы знаний
+        :param symbol: Торговая пара
+        :return: Релевантные данные из знаний
         """
-        relevant = []
+        results = []
         symbol_lower = symbol.lower()
 
         for item in self.knowledge_base:
-            if symbol_lower in item['content'].lower():
-                relevant.append(f"Из {item['source']}:\n{item['content'][:500]}...")
+            if symbol_lower in item["content"].lower():
+                results.append(f"Из {item['source']}:\n{item['content'][:500]}...")
 
-        return "\n\n".join(relevant) if relevant else "Нет релевантной информации в базе данных."
+        return "\n\n".join(results) if results else "Нет релевантной информации"
 
-    def _parse_response(self, response: str) -> Dict[str, any]:
+    def _parse_response(self, response: str) -> Dict[str, Any]:
         """
         Парсинг ответа от LLM
 
-        :param response: Исходный текст ответа
-        :return: Словарь с результатами анализа
+        :param response: Ответ модели
+        :return: Распарсенные данные
         """
         try:
-            # Извлечение рекомендации
             recommendation = self._extract_recommendation(response)
-
-            # Извлечение уровней
-            support_levels = self._extract_levels(response, 'поддержки')
-            resistance_levels = self._extract_levels(response, 'сопротивления')
+            support_levels = self._extract_levels(response, "поддержки")
+            resistance_levels = self._extract_levels(response, "сопротивления")
 
             return {
-                'recommendation': recommendation,
-                'reasoning': response,
-                'support_levels': support_levels,
-                'resistance_levels': resistance_levels,
-                'raw_response': response
+                "recommendation": recommendation,
+                "reasoning": response,
+                "support_levels": support_levels,
+                "resistance_levels": resistance_levels,
+                "raw_response": response
             }
-
         except Exception as e:
-            self.logger.error(f"Ошибка парсинга ответа от Ollama: {str(e)}")
+            self.logger.error(f"Ошибка парсинга ответа: {str(e)}")
             return {
-                'recommendation': 'wait',
-                'reasoning': f"Ошибка парсинга: {str(e)}",
-                'support_levels': [],
-                'resistance_levels': [],
-                'raw_response': ''
+                "recommendation": "wait",
+                "reasoning": f"Ошибка парсинга: {str(e)}",
+                "support_levels": [],
+                "resistance_levels": [],
+                "raw_response": ""
             }
 
     def _extract_recommendation(self, text: str) -> str:
-        """Извлечение рекомендации из текста"""
+        """Извлечение торговой рекомендации из текста"""
         text_lower = text.lower()
-
-        if 'покупать' in text_lower or 'buy' in text_lower:
-            return 'buy'
-        elif 'продавать' in text_lower or 'sell' in text_lower:
-            return 'sell'
-        elif 'ждать' in text_lower or 'wait' in text_lower:
-            return 'wait'
-        elif 'hold' in text_lower:
-            return 'hold'
-        elif 'long' in text_lower:
-            return 'buy'
-        elif 'short' in text_lower:
-            return 'sell'
+        if any(kw in text_lower for kw in ["покупать", "buy", "long"]):
+            return "buy"
+        elif any(kw in text_lower for kw in ["продавать", "sell", "short"]):
+            return "sell"
+        elif any(kw in text_lower for kw in ["ждать", "wait", "hold"]):
+            return "wait"
         else:
-            self.logger.warning("Рекомендация не распознана")
-            return 'wait'
+            self.logger.warning("Не удалось распознать рекомендацию")
+            return "wait"
 
     def _extract_levels(self, text: str, level_type: str) -> List[float]:
         """
         Извлечение уровней поддержки/сопротивления
 
         :param text: Текст для анализа
-        :param level_type: Тип уровня ('поддержки' или 'сопротивления')
+        :param level_type: 'support' или 'resistance'
         :return: Список найденных уровней
         """
-        import re
-
-        # Паттерны для поиска уровней
         patterns = [
             rf'{level_type}[\s\d\.]*?(\d+[\.,]\d+|\d+\s\d+)'
         ]
 
-        if level_type == 'support':
+        if level_type == "support":
             patterns.extend([
                 r'Поддержка.*?(\d+[\.,]\d+)',
-                r'Поддержка.*?на уровне (\d+[\.,]\d+)'
+                r'Уровень поддержки.*?(\d+[\.,]\d+)'
             ])
-        elif level_type == 'resistance':
+        elif level_type == "resistance":
             patterns.extend([
                 r'Сопротивление.*?(\d+[\.,]\d+)',
-                r'Сопротивление.*?на уровне (\d+[\.,]\d+)'
+                r'Уровень сопротивления.*?(\d+[\.,]\d+)'
             ])
 
-        # Поиск по всем паттернам
         results = []
         for pattern in patterns:
             matches = re.findall(pattern, text.lower())
             for match in matches:
                 try:
-                    value = float(match.replace(',', '.').replace(' ', ''))
+                    value = float(match.replace(",", ".").replace(" ", ""))
                     results.append(value)
                 except ValueError:
                     continue
 
-        # Удаление близких значений (слияние дубликатов)
+        # Удаляем близкие значения
         unique_results = []
         for value in sorted(results):
             if not unique_results or abs(value - unique_results[-1]) > 0.0001:
-                unique_results.append(value)
+                unique_results.append(round(value, 5))
 
         self.logger.debug(f"Найдено {len(unique_results)} уровней {level_type}: {unique_results}")
         return unique_results
 
-    def _format_dict(self, data: Dict) -> str:
-        """Форматирование словаря в строку"""
 
-        def _format_dict(self, data: Dict) -> str:
-            """Форматирование словаря в читаемую строку для промпта"""
-
-            def format_recursive(d, indent=0):
-                lines = []
-                for key, value in d.items():
-                    if isinstance(value, dict):
-                        # Если значение — словарь, форматируем рекурсивно
-                        lines.append(f"{' ' * indent}{key}:")
-                        lines.extend(format_recursive(value, indent + 2))
-                    elif isinstance(value, (list, tuple)) and len(value) > 0 and isinstance(value[0], (int, float)):
-                        # Для списков/кортежей из чисел выводим последние 5 значений
-                        lines.append(f"{' ' * indent}{key}: {', '.join(map(str, value[-5:]))}")
-                    else:
-                        # Простые значения
-                        lines.append(f"{' ' * indent}{key}: {value}")
-                return lines
-
-            # Запускаем форматирование
-            formatted_lines = format_recursive(data)
-            return '\n'.join(formatted_lines)
-
-    def get_analysis(self, symbol: str, data: Dict) -> Dict[str, any]:
+    def get_analysis(self, symbol: str, data: Dict) -> Dict[str, Any]:
         """
-        Полный анализ рынка через Ollama
+        Получает анализ рынка через Ollama
 
         :param symbol: Символ для анализа
         :param data: Рыночные данные
@@ -274,14 +235,14 @@ class OllamaIntegration:
         prompt = self._prepare_prompt(symbol, data)
         analysis_result = self.analyze_market(prompt)
 
-        if analysis_result.get('error'):
+        if analysis_result.get("error"):
             return analysis_result
 
-        # Добавляем дополнительные метаданные
         analysis_result.update({
-            'model_used': self.model,
-            'timestamp': datetime.now().isoformat(),
-            'prompt_length': len(prompt)
+            "model_used": self.model,
+            "timestamp": datetime.now().isoformat(),
+            "prompt_length": len(prompt),
         })
 
+        self.logger.info(f"Получен анализ для {symbol}")
         return analysis_result

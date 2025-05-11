@@ -14,7 +14,6 @@ from core.telegram_bot import TelegramBot
 from core.ollama_integration import OllamaIntegration
 from .database import MarketDatabase
 from config.settings import Settings
-
 from utils.logger import TradingLogger
 
 
@@ -54,7 +53,7 @@ def init_core_components(settings: Settings, logger: TradingLogger) -> CoreCompo
 
     try:
         # Инициализация базы данных
-        db_config = settings._settings.get("database", {})
+        db_config = settings.database_config
         if "connection_string" not in db_config:
             db_config["connection_string"] = "sqlite:///data.db"
 
@@ -74,7 +73,7 @@ def init_core_components(settings: Settings, logger: TradingLogger) -> CoreCompo
                 # Подключение только если есть данные
                 if any(mt5_settings.values()):
                     connected = components.mt5.connect(
-                        mt5_settings.get('login', ''),
+                        mt5_settings.get('login', ),
                         mt5_settings.get('password', ''),
                         mt5_settings.get('server', ''),
                         mt5_settings.get('path', '')
