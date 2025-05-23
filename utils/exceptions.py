@@ -294,3 +294,23 @@ class OllamaError(Exception):
 class KnowledgeBaseError(Exception):
     """Ошибка работы с базой знаний"""
     pass
+
+class TelegramError(TradingError):
+    """Ошибка работы с Telegram API"""
+
+    def __init__(
+        self,
+        message: str = "Ошибка работы с Telegram API",
+        details: Optional[Dict[str, Any]] = None,
+        logger: Optional[TradingLogger] = None
+    ):
+        """
+        Инициализация ошибки Telegram
+
+        Args:
+            message: Человеко-читаемое сообщение об ошибке
+            details: Дополнительные технические детали ошибки
+            logger: Опциональный логгер для автоматического логирования
+        """
+        super().__init__(message=message, details=details, logger=logger)
+        self.error_type = "telegram_api_error"

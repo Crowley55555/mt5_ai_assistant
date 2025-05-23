@@ -1,143 +1,158 @@
-import pandas as pd
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional, Dict, List
+import pandas as pd
 from utils.logger import TradingLogger
-from config.constants import TradeAction, Timeframes
+from config.constants import Timeframe
 from core.mt5_client import MT5Client
 from core.database import MarketDatabase
+from utils.exceptions import StrategyError
+
+
+@dataclass
+class IndicatorParams:
+    """Параметры индикаторов стратегии"""
+    sma_fast_period: int = 20
+    sma_slow_period: int = 50
+    rsi_period: int = 14
+    stoch_k_period: int = 14
+    stoch_d_period: int = 3
+    atr_period: int = 14
+    adx_period: int = 14
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    stoch_slowing: int = 3
+    pinbar_threshold: float = 2.0
+    engulfing_ratio: float = 1.5
+    volume_ma_period: int = 20
 
 
 class BaseStrategy(ABC):
-    def __init__(self, name: str, mt5_client: MT5Client, logger: TradingLogger,
-                 database: Optional[MarketDatabase] = None,
-                 sma_fast_period: int = 20,
-                 sma_slow_period: int = 50,
-                 rsi_period: int = 14,
-                 stoch_k_period: int = 14,
-                 stoch_d_period: int = 3,
-                 atr_period: int = 14,
-                 adx_period: int = 14,
-                 macd_fast: int = 12,
-                 macd_slow: int = 26,
-                 macd_signal: int = 9,
-                 stoch_slowing: int = 3,
-                 pinbar_threshold: float = 2.0,
-                 engulfing_ratio: float = 1.5,
-                 volume_ma_period: int = 20):
-        """
-        Базовый класс для всех торговых стратегий
+    """Абстрактный базовый класс для всех торговых стратегий"""
 
-        :param name: Название стратегии
-        :param mt5_client: Клиент для работы с MT5
-        :param logger: Ваш кастомный логгер
-        :param database: База данных (опционально)
-
-        :param sma_fast_period: Период быстрого SMA
-        :param sma_slow_period: Период медленного SMA
-        :param rsi_period: Период RSI
-        :param stoch_k_period: Период Stochastic K
-        :param stoch_d_period: Период Stochastic D
-        :param atr_period: Период ATR
-        :param adx_period: Период ADX
-        :param macd_fast: Быстрая EMA для MACD
-        :param macd_slow: Медленная EMA для MACD
-        :param macd_signal: Signal для MACD
-        :param stoch_slowing: Сглаживание Stochastic
-        :param pinbar_threshold: Порог для пин-бара
-        :param engulfing_ratio: Порог для поглощения
-        :param volume_ma_period: Период скользящего объема
+    def __init__(
+        self,
+        name: str,
+        mt5_client: MT5Client,
+        logger: TradingLogger,
+        database: Optional[MarketDatabase] = None,
+        indicator_params: Optional[IndicatorParams] = None
+    ):
         """
-        if not mt5_client:
-            raise ValueError("MT5 клиент должен быть инициализирован")
+        Инициализация базовой стратегии
+
+        Args:
+            name: Название стратегии
+            mt5_client: Клиент MT5 (должен быть инициализирован)
+            logger: Логгер для записи событий
+            database: База данных для кэширования (опционально)
+            indicator_params: Параметры индикаторов (если None - будут значения по умолчанию)
+        """
+        if not mt5_client.is_connected:
+            raise StrategyError(f"MT5 клиент не подключен для стратегии {name}")
 
         self.name = name
         self.mt5_client = mt5_client
-        self.logger = logger.logger  # Получаем корневой логгер из TradingLogger
+        self.logger = logger.getChild(f"strategy.{name}")
         self.database = database
         self.enabled = False
+        self.symbols: List[str] = []
+        self.timeframes: List[Timeframe] = []
 
-        # Периоды индикаторов
-        self.sma_fast_period = sma_fast_period
-        self.sma_slow_period = sma_slow_period
-        self.rsi_period = rsi_period
-        self.stoch_k_period = stoch_k_period
-        self.stoch_d_period = stoch_d_period
-        self.stoch_slowing = stoch_slowing
-        self.atr_period = atr_period
-        self.adx_period = adx_period
-        self.macd_fast = macd_fast
-        self.macd_slow = macd_slow
-        self.macd_signal = macd_signal
-        self.pinbar_threshold = pinbar_threshold
-        self.engulfing_ratio = engulfing_ratio
-        self.volume_ma_period = volume_ma_period
+        # Параметры индикаторов
+        self.params = indicator_params if indicator_params else IndicatorParams()
+        self._validate_indicator_params()
 
+        self._log_initialization()
 
-        # Списки символов и таймфреймов
-        self.symbols = []  # type: List[str]
-        self.timeframes = []  # type: List[int]
+    def _validate_indicator_params(self) -> None:
+        """Валидация параметров индикаторов"""
+        params = [
+            self.params.sma_fast_period,
+            self.params.sma_slow_period,
+            self.params.rsi_period,
+            self.params.stoch_k_period,
+            self.params.stoch_d_period,
+            self.params.atr_period,
+            self.params.adx_period,
+            self.params.macd_fast,
+            self.params.macd_slow,
+            self.params.macd_signal,
+            self.params.volume_ma_period
+        ]
 
-        # Валидация периодов
-        if not all([
-            sma_fast_period > 0,
-            sma_slow_period > 0,
-            rsi_period > 0,
-            stoch_k_period > 0,
-            stoch_d_period > 0,
-            atr_period > 0,
-            adx_period > 0,
-            macd_fast > 0,
-            macd_slow > 0,
-            macd_signal > 0,
-            volume_ma_period > 0
-        ]):
+        if not all(p > 0 for p in params):
             raise ValueError("Все периоды индикаторов должны быть положительными числами")
 
-        self._log_init_params(logger)
+    def _log_initialization(self) -> None:
+        """Логирование параметров инициализации"""
+        self.logger.debug(
+            f"Инициализирована стратегия {self.name} с параметрами:\n"
+            f"SMA: {self.params.sma_fast_period}/{self.params.sma_slow_period}\n"
+            f"RSI: {self.params.rsi_period}, Stochastic: {self.params.stoch_k_period}/{self.params.stoch_d_period}\n"
+            f"ATR: {self.params.atr_period}, ADX: {self.params.adx_period}\n"
+            f"MACD: {self.params.macd_fast}/{self.params.macd_slow}/{self.params.macd_signal}"
+        )
 
-    def _log_init_params(self, logger: TradingLogger):
-        """Логирование начальных параметров"""
-        logger.debug(f"Инициализирована {self.__class__.__name__} с параметрами:")
-        logger.debug(f"SMA Fast: {self.sma_fast_period}, SMA Slow: {self.sma_slow_period}")
-        logger.debug(f"RSI Period: {self.rsi_period}, Stochastic: {self.stoch_k_period}/{self.stoch_d_period}")
-        logger.debug(f"ATR Period: {self.atr_period}, ADX Period: {self.adx_period}")
-        logger.debug(f"MACD: {self.macd_fast}/{self.macd_slow}/{self.macd_signal}")
+    def cache_indicator(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        timestamp: pd.Timestamp,
+        name: str,
+        value: float
+    ) -> None:
+        """Кэширование значения индикатора"""
+        if self.database:
+            try:
+                self.database.cache_indicator(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    timestamp=int(timestamp.timestamp()),
+                    indicator_name=name,
+                    value=value
+                )
+            except Exception as e:
+                self.logger.warning(f"Ошибка кэширования индикатора {name}: {str(e)}")
 
-    def save_indicator(self, symbol: str, timeframe: int, timestamp: pd.Timestamp, name: str, value: float):
-        """Сохранение значения индикатора в кэше"""
-        if not self.database:
-            return
-
-        try:
-            unix_time = int(timestamp.timestamp())
-            self.database.cache_indicator(symbol, timeframe, unix_time, name, value)
-        except Exception as e:
-            self.logger.warning(f"Ошибка сохранения индикатора {name}: {str(e)}")
-
-    def get_cached_indicator(self, symbol: str, timeframe: int, timestamp: pd.Timestamp, name: str) -> Optional[float]:
+    def get_cached_indicator(
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        timestamp: pd.Timestamp,
+        name: str
+    ) -> Optional[float]:
         """Получение кэшированного значения индикатора"""
         if not self.database:
             return None
 
         try:
-            unix_time = int(timestamp.timestamp())
-            result = self.database.get_cached_indicator(symbol, timeframe, unix_time, name)
-            if result is not None:
-                self.logger.debug(f"Индикатор {name} найден в кэше")
-            return result
+            value = self.database.get_cached_indicator(
+                symbol=symbol,
+                timeframe=timeframe,
+                timestamp=int(timestamp.timestamp()),
+                indicator_name=name
+            )
+            if value is not None:
+                self.logger.debug(f"Индикатор {name} загружен из кэша")
+            return value
         except Exception as e:
             self.logger.warning(f"Ошибка получения индикатора {name}: {str(e)}")
             return None
 
     @abstractmethod
-    def analyze(self, symbol: str, timeframe: int, data: pd.DataFrame) -> Optional[Dict]:
+    def analyze(self, symbol: str, timeframe: Timeframe, data: pd.DataFrame) -> Optional[Dict]:
         """
         Анализ рыночных данных и генерация сигналов
 
-        :param symbol: Символ (EURUSD, GBPUSD и т.д.)
-        :param timeframe: Таймфрейм (в минутах)
-        :param data: OHLCV DataFrame
-        :return: Словарь с сигналом или None
+        Args:
+            symbol: Торговый символ (например, "EURUSD")
+            timeframe: Таймфрейм из констант Timeframe
+            data: DataFrame с OHLCV данными
+
+        Returns:
+            Словарь с сигналом или None если сигнала нет
         """
         pass
 
@@ -146,63 +161,78 @@ class BaseStrategy(ABC):
         """
         Расчет технических индикаторов
 
-        :param data: OHLCV данные
-        :return: DataFrame с добавленными индикаторами
+        Args:
+            data: DataFrame с OHLCV данными
+
+        Returns:
+            DataFrame с добавленными колонками индикаторов
         """
         pass
 
-    def enable(self):
+    def enable(self) -> None:
         """Активация стратегии"""
-        if not self.mt5_client.connected:
-            self.logger.warning("Попытка активировать стратегию без подключения к MT5")
+        if not self.mt5_client.is_connected:
+            self.logger.warning("Не удалось активировать стратегию - нет подключения к MT5")
             return
 
         self.enabled = True
         self.logger.info(f"Стратегия {self.name} активирована")
 
-    def disable(self):
+    def disable(self) -> None:
         """Деактивация стратегии"""
         self.enabled = False
         self.logger.info(f"Стратегия {self.name} деактивирована")
 
-    def set_symbols(self, symbols: List[str]):
+    def set_symbols(self, symbols: List[str]) -> None:
         """Установка списка торгуемых символов"""
         if not isinstance(symbols, list) or not all(isinstance(s, str) for s in symbols):
             raise ValueError("Символы должны быть списком строк")
 
         self.symbols = symbols
-        self.logger.info(f"Для {self.name} установлены символы: {', '.join(symbols)}")
+        self.logger.info(f"Установлены символы: {', '.join(symbols)}")
 
-    def set_timeframes(self, timeframes: List[int]):
+    def set_timeframes(self, timeframes: List[Timeframe]) -> None:
         """Установка списка таймфреймов"""
-        if not isinstance(timeframes, list) or not all(isinstance(tf, int) and tf > 0 for tf in timeframes):
-            raise ValueError("Таймфреймы должны быть списком положительных целых чисел")
+        if not isinstance(timeframes, list) or not all(isinstance(tf, Timeframe) for tf in timeframes):
+            raise ValueError("Таймфреймы должны быть списком значений Timeframe")
 
         self.timeframes = timeframes
-        self.logger.info(f"Для {self.name} установлены таймфреймы: {', '.join(str(tf) for tf in timeframes)}")
+        self.logger.info(f"Установлены таймфреймы: {', '.join(str(tf) for tf in timeframes)}")
 
     def get_required_history_size(self) -> int:
-        """Минимальное количество баров для анализа"""
-        return max(
-            self.sma_fast_period,
-            self.sma_slow_period,
-            self.rsi_period,
-            self.stoch_k_period + self.stoch_d_period + self.stoch_slowing,
-            self.atr_period,
-            self.adx_period * 2,
-            self.macd_slow + self.macd_signal
-        ) + 50  # Запас на всякий случай
+        """
+        Расчет минимального количества баров для анализа
 
-    def load_market_data(self, symbol: str, timeframe: int, count: int) -> Optional[pd.DataFrame]:
-        """Загрузка исторических данных"""
-        if not self.mt5_client.connected:
-            self.logger.warning("Попытка загрузить данные без подключения к MT5")
-            return None
+        Returns:
+            Количество баров с запасом для расчета всех индикаторов
+        """
+        max_period = max(
+            self.params.sma_fast_period,
+            self.params.sma_slow_period,
+            self.params.rsi_period,
+            self.params.stoch_k_period + self.params.stoch_d_period + self.params.stoch_slowing,
+            self.params.atr_period,
+            self.params.adx_period * 2,
+            self.params.macd_slow + self.params.macd_signal
+        )
+        return max_period + 50  # Запас на всякий случай
 
+    def load_market_data(self, symbol: str, timeframe: Timeframe, count: int) -> Optional[pd.DataFrame]:
+        """
+        Загрузка исторических данных
+
+        Args:
+            symbol: Торговый символ
+            timeframe: Таймфрейм
+            count: Требуемое количество баров
+
+        Returns:
+            DataFrame с данными или None при ошибке
+        """
         try:
             data = self.mt5_client.get_historical_data(symbol, timeframe, count)
             if data is None or len(data) < count * 0.8:
-                self.logger.warning(f"Недостаточно данных ({len(data) if data else 0} баров)")
+                self.logger.warning(f"Недостаточно данных ({len(data) if data else 0} из {count} баров)")
                 return None
             return data
         except Exception as e:

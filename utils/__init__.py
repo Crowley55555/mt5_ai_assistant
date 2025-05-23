@@ -26,7 +26,8 @@ from .exceptions import (
     DatabaseConnectionError,
     DatabaseQueryError,
     OllamaError,
-    KnowledgeBaseError
+    KnowledgeBaseError,
+    TelegramError,
 )
 from .helpers import (
     PriceFormatter,
@@ -75,6 +76,7 @@ __all__ = [
     'DatabaseQueryError',
     'OllamaError',
     'KnowledgeBaseError',
+    'TelegramError',
 
     # Хелперы
     'PriceFormatter',
